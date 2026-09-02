@@ -996,6 +996,7 @@ GuestThreadContext *NextGuestThread() {
         GuestThreadContext &candidate =
             guestThreads[(currentIndex + offset) % guestThreads.size()];
         if (candidate.alive && candidate.runnable &&
+                candidate.suspendCount == 0 &&
                 candidate.debuggerId != currentThreadId) {
             return &candidate;
         }
@@ -1265,6 +1266,68 @@ kern_return_t CopyGuestThreadState(
     state[16] = snapshot.cpsr;
     *count = ArmThreadStateWordCount;
     return KERN_SUCCESS;
+}
+
+kern_return_t SuspendGuestThread(mach_port_t target) {
+    EnsureGuestThreadRegistry();
+    const mach_port_t cooperativeMainPort =
+        !NativeGuestThreadsEnabled()
+        ? pthread_mach_thread_np(pthread_self())
+        : MACH_PORT_NULL;
+    std::lock_guard<std::recursive_mutex> lock(guestThreadMutex);
+    for (GuestThreadContext &thread : guestThreads) {
+        if (!thread.alive) {
+            continue;
+        }
+        const bool targetMatches =
+            thread.threadPort == target ||
+            (thread.debuggerId == 1 &&
+             !MACH_PORT_VALID(thread.threadPort) &&
+             target == cooperativeMainPort);
+        if (!targetMatches) {
+            continue;
+        }
+        /*
+         * Cooperative-mode threads honor this at the next NextGuestThread()
+         * rotation. Native-mode threads are real, independently-scheduled
+         * host pthreads, so this does not yet pause them -- it just avoids
+         * crashing on the call. Real native-mode suspend needs a per-thread
+         * pause primitive; the debugger's NativeThreadStatePauseHostWaitIfNeeded
+         * is stop-the-world and can't be reused here as-is.
+         */
+        if (thread.suspendCount < UINT32_MAX) {
+            ++thread.suspendCount;
+        }
+        return KERN_SUCCESS;
+    }
+    return KERN_INVALID_ARGUMENT;
+}
+
+kern_return_t ResumeGuestThread(mach_port_t target) {
+    EnsureGuestThreadRegistry();
+    const mach_port_t cooperativeMainPort =
+        !NativeGuestThreadsEnabled()
+        ? pthread_mach_thread_np(pthread_self())
+        : MACH_PORT_NULL;
+    std::lock_guard<std::recursive_mutex> lock(guestThreadMutex);
+    for (GuestThreadContext &thread : guestThreads) {
+        if (!thread.alive) {
+            continue;
+        }
+        const bool targetMatches =
+            thread.threadPort == target ||
+            (thread.debuggerId == 1 &&
+             !MACH_PORT_VALID(thread.threadPort) &&
+             target == cooperativeMainPort);
+        if (!targetMatches) {
+            continue;
+        }
+        if (thread.suspendCount > 0) {
+            --thread.suspendCount;
+        }
+        return KERN_SUCCESS;
+    }
+    return KERN_INVALID_ARGUMENT;
 }
 
 kern_return_t CopyGuestThreadInfo(
