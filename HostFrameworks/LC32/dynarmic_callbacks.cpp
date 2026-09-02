@@ -207,7 +207,10 @@ public:
             const char *operation, u32 address) {
 #if !IGNORE_BAD_MEM_ACCESS
         SetPendingGuestCrashMessage(
-            "%s at guest address 0x%08x", operation, address);
+            "%s at guest address 0x%08x (last guest selector: %s)",
+            operation, address,
+            LC32LastGuestSelectorDescription[0]
+                ? LC32LastGuestSelectorDescription : "(none yet)");
         // Diagnostic frame walking is not guest execution.  A failed unwind
         // read must not replace the original debugger stop with SIGSEGV.
         if (!dumpingBacktrace) {
