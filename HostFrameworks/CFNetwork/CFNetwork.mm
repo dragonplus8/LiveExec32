@@ -1,6 +1,8 @@
 @import CFNetwork;
 @import Foundation;
 
+#import <objc/runtime.h>
+
 #include "bridge.h"
 #include "../../GuestFrameworks/CFNetwork/LC32CFNetworkBridge.h"
 
@@ -222,6 +224,40 @@ u32 LC32_CFNetwork_Dispatch(u32 opcodeValue, u32 guestCall, u32) {
                     SlotHostObject<CFHTTPMessageRef>(call, 0))) : 0;
     }
     return 0;
+}
+
+static BOOL LC32GADMRAIDInterceptorNeverHandlesRequests(id, SEL,
+        NSURLRequest *) {
+    return NO;
+}
+
+void LC32CFNetworkPrepareGuestClass(Class cls) {
+    if(!cls) return;
+    /*
+     * Google Mobile Ads' MRAID request interceptor is registered via
+     * +[NSURLProtocol registerClass:] and gets asked about every network
+     * request the app makes, not just ad traffic. It crashes reading
+     * unmapped guest memory inside its own +canInitWithRequest: -- last
+     * guest selector logged as +[GADMRAIDInterceptor canInitWithRequest:],
+     * with the faulting address above every mapped guest image and lr
+     * clobbered to a non-address. The bug is inside Google's own compiled
+     * code, not anything LC32 bridges, so there is nothing here to patch
+     * directly. Since this class only intercepts rich-media ad requests --
+     * nothing the game itself depends on -- the safe move is to keep it
+     * from ever being asked to handle a request at all, rather than guess
+     * at its internal state. Only this exact class name is touched; every
+     * other registered NSURLProtocol, including other AdMob interceptors,
+     * keeps working normally.
+     */
+    if(strcmp(class_getName(cls), "GADMRAIDInterceptor") != 0) return;
+
+    SEL selector = @selector(canInitWithRequest:);
+    Method declaration = class_getClassMethod([NSURLProtocol class],
+        selector);
+    if(!declaration) return;
+    class_replaceMethod(object_getClass(cls), selector,
+        (IMP)&LC32GADMRAIDInterceptorNeverHandlesRequests,
+        method_getTypeEncoding(declaration));
 }
 
 __END_DECLS
