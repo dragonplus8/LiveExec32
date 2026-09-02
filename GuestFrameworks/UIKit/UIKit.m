@@ -41,6 +41,12 @@ UIApplicationLaunchOptionsKey const UIApplicationLaunchOptionsLocalNotificationK
     @"UIApplicationLaunchOptionsLocalNotificationKey";
 UIApplicationLaunchOptionsKey const UIApplicationLaunchOptionsRemoteNotificationKey =
     @"UIApplicationLaunchOptionsRemoteNotificationKey";
+UIApplicationLaunchOptionsKey const UIApplicationLaunchOptionsURLKey =
+    @"UIApplicationLaunchOptionsURLKey";
+UIApplicationLaunchOptionsKey const UIApplicationLaunchOptionsSourceApplicationKey =
+    @"UIApplicationLaunchOptionsSourceApplicationKey";
+UIApplicationLaunchOptionsKey const UIApplicationLaunchOptionsAnnotationKey =
+    @"UIApplicationLaunchOptionsAnnotationKey";
 NSString *const UIApplicationStatusBarOrientationUserInfoKey =
     @"UIApplicationStatusBarOrientationUserInfoKey";
 NSNotificationName const UIApplicationWillChangeStatusBarOrientationNotification =
