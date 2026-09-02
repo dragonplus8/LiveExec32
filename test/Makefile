@@ -90,6 +90,7 @@ $(eval $(call lc32_test,lc32-darwin-eperm,darwin_eperm.c,))
 $(eval $(call lc32_test,lc32-darwin-safe-syscalls,darwin_safe_syscalls.c,))
 $(eval $(call lc32_test,lc32-debugger-stop,debugger_stop_worker.c,))
 $(eval $(call lc32_test,lc32-debugger-stop-main,debugger_stop.c,))
+$(eval $(call lc32_test,lc32-fcntl-filesigs-return,fcntl_filesigs_return.c,))
 $(eval $(call lc32_test,lc32-getsockname-abi,getsockname_abi.c,))
 $(eval $(call lc32_test,lc32-getsockopt-abi,getsockopt_abi.c,))
 $(eval $(call lc32_test,lc32-host-info,host_info.c,))
@@ -174,6 +175,7 @@ $(eval $(call lc32_guest_test,lc32-text-input-traits,text_input_traits.m,Foundat
 $(eval $(call lc32_guest_test,lc32-uikit-appearance,uikit_appearance.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-accessibility,uikit_accessibility.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-image-context,uikit_image_context.m,Foundation UIKit CoreGraphics LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-legacy-device,uikit_legacy_device.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-string-sizing,uikit_legacy_string_sizing.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-window-root,uikit_legacy_window_root.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-view-load-reentrancy,uikit_view_load_reentrancy.m,Foundation UIKit CoreGraphics LC32))
@@ -236,7 +238,7 @@ lc32-uikit-appearance_CFLAGS := -Wno-deprecated-declarations
 ABI_TESTS := \
   lc32-aes-ioctl-abi lc32-bind-abi lc32-connect-nocancel lc32-cwd-syscalls \
   lc32-darwin-eperm lc32-darwin-safe-syscalls lc32-debugger-stop \
-  lc32-debugger-stop-main lc32-getsockname-abi \
+  lc32-debugger-stop-main lc32-fcntl-filesigs-return lc32-getsockname-abi \
   lc32-getsockopt-abi lc32-host-info lc32-kqueue-kevent lc32-lseek-abi \
   lc32-mremap-encrypted lc32-native-pthread-smoke lc32-recvfrom-abi \
   lc32-setsockopt-abi \
