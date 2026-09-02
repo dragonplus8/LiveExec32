@@ -345,6 +345,15 @@ void Dynarmic_free(void *ctx);
 
 u64 LC32Dlsym(u32 guest_name, bool isFunction);
 u64 LC32GetHostObject(u32 guest_self, u32 guest_class, bool returnClass);
+
+/*
+ * Set unconditionally (no trace flag needed) at the top of every guest
+ * method invocation, so the crash reporter can always say which guest
+ * selector was actually being called, without needing LC32_CALLBACK_TRACE
+ * or any console/log access -- just what's already in the pasted crash
+ * report.
+ */
+extern char LC32LastGuestSelectorDescription[256];
 u64 LC32CreateHostBlock(u32 guest_block);
 u32 LC32GuestObjectForOwnedHostObjectAddress(u64 object);
 LC32HostWeakRetainResult LC32TryRetainHostWeakReference(u32 guest_object);
