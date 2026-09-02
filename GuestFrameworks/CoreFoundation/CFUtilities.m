@@ -426,6 +426,20 @@ CFUUIDBytes CFUUIDGetUUIDBytes(CFUUIDRef uuid) {
     return result.bytes;
 }
 
+@implementation NSUUID (LC32Bytes)
+/*
+ * Real Apple declares this as -getUUIDBytes:(uuid_t)uuid. uuid_t is just
+ * unsigned char[16], which decays to unsigned char * as a parameter either
+ * way, so this signature is ABI-identical without needing <uuid/uuid.h>.
+ * Same round-trip-through-the-string approach as CFUUIDGetUUIDBytes above,
+ * reusing the same hex parser instead of duplicating it.
+ */
+- (void)getUUIDBytes:(unsigned char *)uuid {
+    if(!uuid) return;
+    LC32CFUUIDParseString(self.UUIDString.UTF8String, uuid);
+}
+@end
+
 CFStringRef CFUUIDCreateString(CFAllocatorRef allocator, CFUUIDRef uuid) {
     (void)allocator;
     return uuid ? (CFStringRef)[[(NSUUID *)uuid UUIDString] copy] : NULL;
