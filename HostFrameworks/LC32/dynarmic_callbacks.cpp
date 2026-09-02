@@ -206,11 +206,44 @@ public:
     void HandleBadMemoryAccess(
             const char *operation, u32 address) {
 #if !IGNORE_BAD_MEM_ACCESS
+        /*
+         * A handful of these have turned out to be deterministic (same
+         * fault address across separate runs) but with a misleading
+         * "last guest selector" -- the real cause was unrelated code
+         * that happened to run afterward, not the selector itself. A
+         * raw hex window around the fault address costs nothing to
+         * capture and gives real data to reason about next time,
+         * without risking a second fault: every word is read through
+         * the same permission-checked path already used elsewhere in
+         * this file, and a miss is just recorded as such.
+         */
+        char nearbyDump[256] = {0};
+        size_t nearbyLen = 0;
+        const u32 windowStart = (address >= 16 ? address - 16 : 0) & ~3u;
+        for (u32 offset = 0; offset <= 32 &&
+                nearbyLen + 20 < sizeof(nearbyDump); offset += 4) {
+            const u32 wordAddress = windowStart + offset;
+            u32 word = 0;
+            const bool readable = read_guest_memory_with_permissions(
+                wordAddress, &word, sizeof(word), PROT_READ);
+            const int written = readable
+                ? snprintf(nearbyDump + nearbyLen,
+                    sizeof(nearbyDump) - nearbyLen,
+                    "%s%08x:%08x", nearbyLen ? " " : "", wordAddress, word)
+                : snprintf(nearbyDump + nearbyLen,
+                    sizeof(nearbyDump) - nearbyLen,
+                    "%s%08x:--------", nearbyLen ? " " : "", wordAddress);
+            if (written > 0) {
+                nearbyLen += static_cast<size_t>(written);
+            }
+        }
         SetPendingGuestCrashMessage(
-            "%s at guest address 0x%08x (last guest selector: %s)",
+            "%s at guest address 0x%08x (last guest selector: %s) "
+            "[nearby: %s]",
             operation, address,
             LC32LastGuestSelectorDescription[0]
-                ? LC32LastGuestSelectorDescription : "(none yet)");
+                ? LC32LastGuestSelectorDescription : "(none yet)",
+            nearbyDump);
         // Diagnostic frame walking is not guest execution.  A failed unwind
         // read must not replace the original debugger stop with SIGSEGV.
         if (!dumpingBacktrace) {
