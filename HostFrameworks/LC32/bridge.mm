@@ -364,6 +364,11 @@ static bool LC32GuestCallbackTraceIsEnabled;
 static pthread_once_t LC32BlockArgumentTraceOnce = PTHREAD_ONCE_INIT;
 static bool LC32BlockArgumentTraceIsEnabled;
 
+/* Storage for the extern declared in dynarmic.h. Zero-initialized so a
+ * crash before any guest selector has ever been invoked reports an empty
+ * string rather than garbage. */
+char LC32LastGuestSelectorDescription[256] = {0};
+
 static void LC32InitializeNetworkTrace() {
     const char *value = getenv("LC32_NETWORK_TRACE");
     LC32NetworkTraceIsEnabled =
@@ -4308,6 +4313,11 @@ static u64 LC32InvokeGuestSelectorRaw(id self, SEL _cmd,
                                      va_list *hostStackArguments,
                                      Method *resolvedMethod) {
     LC32TraceGuestMethodCallback(self, _cmd);
+    snprintf(LC32LastGuestSelectorDescription,
+        sizeof(LC32LastGuestSelectorDescription), "%c[%s %s]",
+        self && object_isClass(self) ? '+' : '-',
+        self ? class_getName(object_getClass(self)) : "(null)",
+        _cmd ? sel_getName(_cmd) : "(null)");
     // FIXME: fast path to get guest selector? cache to hash map?
     u32 guest_cmd = guest_sel_registerName(sel_getName(_cmd));
     Method method = object_isClass(self) ? class_getClassMethod(self, _cmd) : class_getInstanceMethod((Class)[self class], _cmd);
@@ -4835,6 +4845,7 @@ Class guest_objc_getClass_retHostClass(const char *name) {
     // resolve methods and register a dynamic resolver
     [LC32ObjCMethodResolver registerClass:outClass];
     LC32UIKitPrepareGuestClass(outClass);
+    LC32CFNetworkPrepareGuestClass(outClass);
     // register to objc
     objc_registerClassPair(outClass);
     [outClass setGuestClass:YES];
