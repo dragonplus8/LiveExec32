@@ -4313,6 +4313,11 @@ static u64 LC32InvokeGuestSelectorRaw(id self, SEL _cmd,
                                      va_list *hostStackArguments,
                                      Method *resolvedMethod) {
     LC32TraceGuestMethodCallback(self, _cmd);
+    snprintf(LC32LastGuestSelectorDescription,
+        sizeof(LC32LastGuestSelectorDescription), "%c[%s %s]",
+        self && object_isClass(self) ? '+' : '-',
+        self ? class_getName(object_getClass(self)) : "(null)",
+        _cmd ? sel_getName(_cmd) : "(null)");
     // FIXME: fast path to get guest selector? cache to hash map?
     u32 guest_cmd = guest_sel_registerName(sel_getName(_cmd));
     Method method = object_isClass(self) ? class_getClassMethod(self, _cmd) : class_getInstanceMethod((Class)[self class], _cmd);
