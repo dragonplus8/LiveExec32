@@ -73,6 +73,16 @@ static LC32CFUUIDBytes LC32CFUUIDBytesMake(
 
 /* Foundation's iOS 6 import is two-level bound to CoreFoundation. */
 NSString * const NSGregorianCalendar = @"gregorian";
+NSString * const NSBuddhistCalendar = @"buddhist";
+NSString * const NSChineseCalendar = @"chinese";
+NSString * const NSHebrewCalendar = @"hebrew";
+NSString * const NSIslamicCalendar = @"islamic";
+NSString * const NSIslamicCivilCalendar = @"islamic-civil";
+NSString * const NSJapaneseCalendar = @"japanese";
+NSString * const NSRepublicOfChinaCalendar = @"roc";
+NSString * const NSPersianCalendar = @"persian";
+NSString * const NSIndianCalendar = @"indian";
+NSString * const NSISO8601Calendar = @"iso8601";
 
 CFAbsoluteTime CFAbsoluteTimeGetCurrent(void) {
     return [NSDate timeIntervalSinceReferenceDate];
