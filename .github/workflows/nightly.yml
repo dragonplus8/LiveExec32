@@ -2,7 +2,7 @@ name: Build LiveExec32
 
 on:
   push:
-    branches: [main, dev]
+    branches: [Probably-not-worth-it, dev]
   pull_request:
     branches: [main]
   workflow_dispatch:
