@@ -400,7 +400,7 @@ static LC32SelectorValueStorage *LC32RetainedStorageForHostValue(id value) {
     uint32_t guestValueSize = 0;
     uint32_t hostValueSize = 0;
     const char *hostEncoding = NULL;
-    if(strcmp(unqualifiedType, ":") == 0) {
+        if(strcmp(unqualifiedType, ":") == 0) {
         uint32_t guestSelector = 0;
         memcpy(&guestSelector, bytes, sizeof(guestSelector));
         uint64_t hostSelector = guestSelector
@@ -412,6 +412,24 @@ static LC32SelectorValueStorage *LC32RetainedStorageForHostValue(id value) {
         guestValueSize = sizeof(guestSelector);
         hostValueSize = sizeof(hostSelector);
         hostEncoding = ":";
+    } else if(unqualifiedType[0] == '^') {
+        /* A guest pointer is not a valid host address and must never be
+         * dereferenced across the boundary -- but callers overwhelmingly
+         * use NSValue-wrapped pointers as opaque round-tripped tags (e.g.
+         * userInfo payloads, identity keys), not as something Foundation
+         * itself dereferences. Zero-extend the raw bits into a real
+         * pointer-sized host slot, exactly like the SEL case above, so the
+         * value survives a round trip without ever being treated as a
+         * dereferenceable native address. */
+        uint32_t guestPointer = 0;
+        memcpy(&guestPointer, bytes, sizeof(guestPointer));
+        uint64_t hostPointer = guestPointer;
+        hostValueStorage = malloc(sizeof(hostPointer));
+        if(!hostValueStorage) return nil;
+        memcpy(hostValueStorage, &hostPointer, sizeof(hostPointer));
+        guestValueSize = sizeof(guestPointer);
+        hostValueSize = sizeof(hostPointer);
+        hostEncoding = "^v";
     } else {
         const LC32ValueLayout *layout =
             LC32ValueLayoutForEncoding(unqualifiedType);
@@ -473,6 +491,16 @@ static LC32SelectorValueStorage *LC32RetainedStorageForHostValue(id value) {
 + (instancetype)value:(const void *)value
           withObjCType:(const char *)type {
     return [self valueWithBytes:value objCType:type];
+}
+
++ (instancetype)valueWithPointer:(const void *)pointer {
+    return [self valueWithBytes:&pointer objCType:@encode(void *)];
+}
+
+- (void *)pointerValue {
+    void *pointer = NULL;
+    [self getValue:&pointer];
+    return pointer;
 }
 
 - (void)getValue:(void *)value {
