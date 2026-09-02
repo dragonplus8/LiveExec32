@@ -81,7 +81,7 @@ const CFStringRef kCFStringTransformStripCombiningMarks =
     CFSTR(")kCFStringTransformStripCombiningMarks");
 const CFStringRef kCFStringTransformToLatin =
     CFSTR(")kCFStringTransformToLatin");
-    
+
 const CFStringRef kCFPreferencesAnyApplication =
     CFSTR("kCFPreferencesAnyApplication");
 const CFStringRef kCFPreferencesCurrentApplication =
