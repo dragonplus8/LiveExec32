@@ -355,6 +355,8 @@ kern_return_t CopyGuestThreadState(
     mach_port_t target, thread_state_flavor_t flavor,
     mach_msg_type_number_t capacity, u32 *state,
     mach_msg_type_number_t *count);
+kern_return_t SuspendGuestThread(mach_port_t target);
+kern_return_t ResumeGuestThread(mach_port_t target);
 kern_return_t CopyGuestThreadInfo(
     mach_port_t target, thread_flavor_t flavor,
     mach_msg_type_number_t capacity, integer_t *info,
@@ -783,6 +785,11 @@ struct GuestThreadContext {
     bool alive = false;
     bool runnable = false;
     bool workqueue = false;
+    // thread_suspend/thread_resume (MIG 3605/3606) refcount. Checked by
+    // NextGuestThread() before a cooperative thread is scheduled. Native-
+    // mode threads are real host pthreads and don't consult this yet --
+    // see SuspendGuestThread's comment.
+    u32 suspendCount = 0;
     NativeGuestJit *nativeJit = nullptr;
 };
 
