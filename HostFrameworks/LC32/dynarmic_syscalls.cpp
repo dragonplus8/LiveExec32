@@ -1675,6 +1675,42 @@ guest_mach_msg_trap(u32 guest_msg,
             host_header->msgh_size = replySize;
             break;
         }
+        case 3605: // thread_suspend
+        case 3606: { // thread_resume
+            /*
+             * Neither routine carries a request body beyond the standard
+             * header -- the target is msgh_request_port itself -- and the
+             * reply is a bare kern_return_t, so mig_reply_error_t covers
+             * both directions.
+             */
+            if (send_size != sizeof(mach_msg_header_t)) {
+                if (rcv_size < sizeof(mig_reply_error_t)) {
+                    host_header->msgh_size = sizeof(mig_reply_error_t);
+                    result = MACH_RCV_TOO_LARGE;
+                } else {
+                    auto *error = reinterpret_cast<mig_reply_error_t *>(
+                        host_header);
+                    host_header->msgh_size = sizeof(*error);
+                    error->NDR = NDR_record;
+                    error->RetCode = MIG_BAD_ARGUMENTS;
+                }
+                break;
+            }
+            if (rcv_size < sizeof(mig_reply_error_t)) {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+            const kern_return_t kr = host_header->msgh_id == 3605
+                ? SuspendGuestThread(host_header->msgh_request_port)
+                : ResumeGuestThread(host_header->msgh_request_port);
+            auto *reply2 = reinterpret_cast<mig_reply_error_t *>(
+                host_header);
+            host_header->msgh_size = sizeof(*reply2);
+            reply2->NDR = NDR_record;
+            reply2->RetCode = kr;
+            break;
+        }
         case 3409: {
             MACH_MSG_UNION(task_get_special_port, Mess);
             host_header->msgh_bits |= MACH_MSGH_BITS_COMPLEX;
