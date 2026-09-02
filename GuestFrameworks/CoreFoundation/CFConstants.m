@@ -81,7 +81,7 @@ const CFStringRef kCFStringTransformStripCombiningMarks =
     CFSTR(")kCFStringTransformStripCombiningMarks");
 const CFStringRef kCFStringTransformToLatin =
     CFSTR(")kCFStringTransformToLatin");
-
+    
 const CFStringRef kCFPreferencesAnyApplication =
     CFSTR("kCFPreferencesAnyApplication");
 const CFStringRef kCFPreferencesCurrentApplication =
@@ -116,13 +116,73 @@ NSString * const NSMallocException = @"NSMallocException";
 NSString * const NSRangeException = @"NSRangeException";
 NSString * const NSLocaleCountryCode = @"kCFLocaleCountryCodeKey";
 NSString * const NSLocaleCurrencyCode = @"currency";
+NSString * const NSLocaleCurrencySymbol = @"currencySymbol";
 NSString * const NSLocaleIdentifier = @"kCFLocaleIdentifierKey";
 NSString * const NSLocaleLanguageCode = @"kCFLocaleLanguageCodeKey";
 NSNotificationName const NSCurrentLocaleDidChangeNotification =
     @"kCFLocaleCurrentLocaleDidChangeNotification";
 NSString * const NSRunLoopCommonModes = @"kCFRunLoopCommonModes";
+/*
+ * The full standard (non-volume) NSURLResourceKey family. These came in
+ * one crash at a time until it became clear the game enumerates a
+ * directory with a large resourceValuesForKeys: array -- adding the whole
+ * set now instead of continuing to trickle them in one per rebuild.
+ * All self-named, like NSURLIsExcludedFromBackupKey below.
+ */
 NSString * const NSURLIsExcludedFromBackupKey =
     @"NSURLIsExcludedFromBackupKey";
+NSString * const NSURLNameKey = @"NSURLNameKey";
+NSString * const NSURLLocalizedNameKey = @"NSURLLocalizedNameKey";
+NSString * const NSURLPathKey = @"NSURLPathKey";
+NSString * const NSURLIsRegularFileKey = @"NSURLIsRegularFileKey";
+NSString * const NSURLIsDirectoryKey = @"NSURLIsDirectoryKey";
+NSString * const NSURLIsSymbolicLinkKey = @"NSURLIsSymbolicLinkKey";
+NSString * const NSURLIsVolumeKey = @"NSURLIsVolumeKey";
+NSString * const NSURLIsPackageKey = @"NSURLIsPackageKey";
+NSString * const NSURLIsApplicationKey = @"NSURLIsApplicationKey";
+NSString * const NSURLApplicationIsScriptableKey =
+    @"NSURLApplicationIsScriptableKey";
+NSString * const NSURLIsSystemImmutableKey = @"NSURLIsSystemImmutableKey";
+NSString * const NSURLIsUserImmutableKey = @"NSURLIsUserImmutableKey";
+NSString * const NSURLIsHiddenKey = @"NSURLIsHiddenKey";
+NSString * const NSURLHasHiddenExtensionKey =
+    @"NSURLHasHiddenExtensionKey";
+NSString * const NSURLCreationDateKey = @"NSURLCreationDateKey";
+NSString * const NSURLContentAccessDateKey = @"NSURLContentAccessDateKey";
+NSString * const NSURLContentModificationDateKey =
+    @"NSURLContentModificationDateKey";
+NSString * const NSURLAttributeModificationDateKey =
+    @"NSURLAttributeModificationDateKey";
+NSString * const NSURLLinkCountKey = @"NSURLLinkCountKey";
+NSString * const NSURLParentDirectoryURLKey =
+    @"NSURLParentDirectoryURLKey";
+NSString * const NSURLVolumeURLKey = @"NSURLVolumeURLKey";
+NSString * const NSURLTypeIdentifierKey = @"NSURLTypeIdentifierKey";
+NSString * const NSURLLocalizedTypeDescriptionKey =
+    @"NSURLLocalizedTypeDescriptionKey";
+NSString * const NSURLLabelNumberKey = @"NSURLLabelNumberKey";
+NSString * const NSURLLabelColorKey = @"NSURLLabelColorKey";
+NSString * const NSURLLocalizedLabelKey = @"NSURLLocalizedLabelKey";
+NSString * const NSURLEffectiveIconKey = @"NSURLEffectiveIconKey";
+NSString * const NSURLCustomIconKey = @"NSURLCustomIconKey";
+NSString * const NSURLFileResourceIdentifierKey =
+    @"NSURLFileResourceIdentifierKey";
+NSString * const NSURLVolumeIdentifierKey = @"NSURLVolumeIdentifierKey";
+NSString * const NSURLPreferredIOBlockSizeKey =
+    @"NSURLPreferredIOBlockSizeKey";
+NSString * const NSURLIsReadableKey = @"NSURLIsReadableKey";
+NSString * const NSURLIsWritableKey = @"NSURLIsWritableKey";
+NSString * const NSURLIsExecutableKey = @"NSURLIsExecutableKey";
+NSString * const NSURLFileSecurityKey = @"NSURLFileSecurityKey";
+NSString * const NSURLIsMountTriggerKey = @"NSURLIsMountTriggerKey";
+NSString * const NSURLFileResourceTypeKey = @"NSURLFileResourceTypeKey";
+NSString * const NSURLFileSizeKey = @"NSURLFileSizeKey";
+NSString * const NSURLFileAllocatedSizeKey =
+    @"NSURLFileAllocatedSizeKey";
+NSString * const NSURLTotalFileSizeKey = @"NSURLTotalFileSizeKey";
+NSString * const NSURLTotalFileAllocatedSizeKey =
+    @"NSURLTotalFileAllocatedSizeKey";
+NSString * const NSURLIsAliasFileKey = @"NSURLIsAliasFileKey";
 
 extern const void *__CFTypeCollectionRetain(CFAllocatorRef allocator,
                                              const void *value);
