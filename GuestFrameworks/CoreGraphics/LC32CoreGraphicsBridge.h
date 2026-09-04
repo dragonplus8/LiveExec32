@@ -111,6 +111,7 @@ typedef enum : uint32_t {
     LC32CoreGraphicsOpContextSetTextMatrix = 93,
     LC32CoreGraphicsOpPathGetBoundingBox = 94,
     LC32CoreGraphicsOpImageCreate = 95,
+    LC32CoreGraphicsOpContextSetAlpha = 96,
 } LC32CoreGraphicsOpcode;
 
 #endif
