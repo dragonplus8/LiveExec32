@@ -1922,6 +1922,19 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
                 } else if (cpu->Regs()[1] >= NSIG) {
                     cpu->Regs()[0] =
                         return_with_carry_direct(EINVAL, true);
+                } else if (GuestHasNonDefaultSignalDisposition(
+                        static_cast<int>(cpu->Regs()[1]))) {
+                    /*
+                     * The guest installed its own handler (or asked to
+                     * ignore this signal) via sigaction. Real iOS would
+                     * run that handler rather than terminate the
+                     * process; LC32 doesn't yet deliver signals into
+                     * guest code, but the least-wrong thing to do until
+                     * it does is not report a false-positive fatal
+                     * crash for a signal the guest explicitly opted to
+                     * handle itself.
+                     */
+                    cpu->Regs()[0] = 0;
                 } else {
                     cpu->Regs()[0] = 0;
                     SetPendingGuestCrashMessage(
