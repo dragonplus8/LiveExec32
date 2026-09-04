@@ -3861,15 +3861,34 @@ int guest_setxattr(u32 guest_path, u32 guest_name, u32 guest_value,
         position, options, 0);
 }
 
+static sigaction_32 guestSignalActions[SIGUSR2 + 1];
+
+bool GuestHasNonDefaultSignalDisposition(int sig) {
+    /*
+     * SIG_DFL is the POSIX-guaranteed sentinel value 0, so a nonzero
+     * handler here means the guest installed a real handler or asked to
+     * ignore the signal (SIG_IGN == 1) -- either way, real iOS would not
+     * terminate the process for it. Used by pthread_kill so a guest's
+     * own signal-handler self-test (install a handler, then raise the
+     * signal on yourself to confirm the chain works -- a common pattern
+     * in crash-reporting SDKs) doesn't get reported as a fatal LC32
+     * crash just because LC32 doesn't yet deliver signals into guest
+     * handler code.
+     */
+    if (sig < 0 || sig > SIGUSR2) {
+        return false;
+    }
+    return guestSignalActions[sig]._sa_handler != 0;
+}
+
 int guest_sigaction(int sig, u32 guest_act, u32 guest_oact) {
-    static sigaction_32 host_actions[SIGUSR2 + 1];
     if (guest_oact) {
-        Dynarmic_mem_1write(guest_oact, sizeof(sigaction_32), (char *)&host_actions[sig]);
+        Dynarmic_mem_1write(guest_oact, sizeof(sigaction_32), (char *)&guestSignalActions[sig]);
     }
     if (guest_act) {
-        printf("LC32: sigaction: 0x%08x -> ", host_actions[sig]._sa_handler);
-        Dynarmic_mem_1read(guest_act, sizeof(sigaction_32), (char *)&host_actions[sig]);
-        printf("LC32: 0x%08x\n", host_actions[sig]._sa_handler);
+        printf("LC32: sigaction: 0x%08x -> ", guestSignalActions[sig]._sa_handler);
+        Dynarmic_mem_1read(guest_act, sizeof(sigaction_32), (char *)&guestSignalActions[sig]);
+        printf("LC32: 0x%08x\n", guestSignalActions[sig]._sa_handler);
     }
     return 0;
 }
