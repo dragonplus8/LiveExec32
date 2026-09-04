@@ -1180,6 +1180,13 @@ u32 LC32_CoreGraphics_Dispatch(u32 opcode, u32 guestCall, u32) {
             CGContextSetLineWidth(context, SlotCGFloat(call, 1));
             return 1;
         }
+        case LC32CoreGraphicsOpContextSetAlpha: {
+            if(!RequireCoreGraphicsSlots(call, 2)) return 0;
+            CGContextRef context = SlotHostObject<CGContextRef>(call, 0);
+            if(!context) return 0;
+            CGContextSetAlpha(context, SlotCGFloat(call, 1));
+            return 1;
+        }
         case LC32CoreGraphicsOpContextSetShouldAntialias: {
             if(!RequireCoreGraphicsSlots(call, 2)) return 0;
             CGContextRef context = SlotHostObject<CGContextRef>(call, 0);
