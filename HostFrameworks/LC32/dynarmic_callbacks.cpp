@@ -313,7 +313,8 @@ public:
             constexpr u32 kFMODPoolWalkFaultPCEnd = 0x120c8b00;
             const u32 currentPC = cpu->Regs()[15];
             if (currentPC >= kFMODPoolWalkFaultPCStart &&
-                    currentPC < kFMODPoolWalkFaultPCEnd) {                fprintf(stderr,
+                    currentPC < kFMODPoolWalkFaultPCEnd) {
+                fprintf(stderr,
                     "MemoryRead32[%s->%s:%d]: tolerating known FMOD "
                     "pool-walk fault at vaddr=0x%x, reporting 0 (treated "
                     "as end of list)\n",
