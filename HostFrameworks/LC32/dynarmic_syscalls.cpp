@@ -4234,6 +4234,17 @@ int guest_mprotect(u32 guest_addr, size_t len, int prot) {
     return result;
 }
 
+#ifndef F_SETCONFINED
+/*
+ * "confine" OFD to process (fcntl.h, command 95). Real command, real
+ * number -- confirmed against Apple's own XNU source -- but declared
+ * inside an #ifdef PRIVATE block in fcntl.h, so it isn't visible to a
+ * normal public-SDK build like this project's. Defined locally rather
+ * than building against private headers.
+ */
+#define F_SETCONFINED 95
+#endif
+
 int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
     switch (cmd) {
         // r2 is null or is a literal
@@ -4263,13 +4274,8 @@ int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
         case F_SETOWN:
         case F_RDAHEAD:
         case F_NOCACHE:
-            return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);
         case F_SETCONFINED:
-    // F_SETCONFINED is a private Darwin fcntl command (95).
-    // It is part of the guest ABI but is not exposed by the public
-    // iPhoneOS SDK. Don't forward it to the host kernel.
-    return 0;
-        
+            return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);
         case F_FULLFSYNC:
             return debugger_aware_host_wait(
                 [&] {
