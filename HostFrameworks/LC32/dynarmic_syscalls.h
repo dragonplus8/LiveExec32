@@ -143,6 +143,8 @@ kern_return_t guest__kernelrpc_mach_vm_map_trap(
     mach_vm_offset_t mask, int flags, vm_prot_t current_protection);
 kern_return_t guest__kernelrpc_mach_vm_deallocate_trap(
     u32 target, vm_address_t address, mach_vm_size_t size);
+kern_return_t guest__kernelrpc_mach_vm_purgable_control_trap(
+    u32 target, u64 address, int control, u32 guest_state);
 int guest_abort_with_payload(u32 reason_namespace, u64 reason_code,
                              u32 guest_payload, u32 payload_size,
                              u32 guest_reason_string, u64 reason_flags);
