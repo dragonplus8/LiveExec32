@@ -4263,7 +4263,8 @@ int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
         case F_SETOWN:
         case F_RDAHEAD:
         case F_NOCACHE:
-            return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);
+        case F_SETCONFINED:
+            return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);;
         case F_FULLFSYNC:
             return debugger_aware_host_wait(
                 [&] {
