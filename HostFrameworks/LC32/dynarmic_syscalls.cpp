@@ -4640,6 +4640,39 @@ kern_return_t guest__kernelrpc_mach_vm_map_trap(mach_port_name_t target, u32 gue
     return KERN_SUCCESS;
 }
 
+kern_return_t guest__kernelrpc_mach_vm_purgable_control_trap(
+        u32 target, u64 address, int control, u32 guest_state) {
+    if (target != mach_task_self()) {
+        return KERN_FAILURE;
+    }
+    (void)address;
+    (void)control;
+    /*
+     * Real purgeable memory lets the host kernel silently reclaim pages
+     * under memory pressure once marked volatile, with the caller
+     * expected to detect and rebuild anything that got purged. Actually
+     * forwarding that to the real kernel needs translating the guest
+     * address into the real host virtual address backing it, and this
+     * project doesn't have a general helper for that yet -- rather than
+     * build that blind, every guest region here is just reported as
+     * always-resident: this always succeeds and reports
+     * VM_PURGABLE_NONVOLATILE regardless of the requested control, for
+     * both SET_STATE and GET_STATE. That's safe for a caller like
+     * SQLite's page-cache purging -- it never believes data was silently
+     * discarded, it just never gets the memory-pressure relief a real
+     * purgeable mapping would give. Known gap, not yet built.
+     */
+    if (guest_state) {
+        const int nonvolatile = VM_PURGABLE_NONVOLATILE;
+        if (!write_guest_memory_with_permissions(
+                guest_state, &nonvolatile, sizeof(nonvolatile),
+                PROT_WRITE)) {
+            return KERN_INVALID_ADDRESS;
+        }
+    }
+    return KERN_SUCCESS;
+}
+
 kern_return_t guest__kernelrpc_mach_vm_deallocate_trap(u32 target, vm_address_t address, mach_vm_size_t size) {
     if (target != mach_task_self()) {
         return KERN_FAILURE;
