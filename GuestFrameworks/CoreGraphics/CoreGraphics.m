@@ -580,6 +580,11 @@ void CGContextSetLineWidth(CGContextRef context, CGFloat width) {
         LC32_CG_HOST(context), LC32_CG_F32(width));
 }
 
+void CGContextSetAlpha(CGContextRef context, CGFloat alpha) {
+    if(context) LC32_CG_CALL(LC32CoreGraphicsOpContextSetAlpha,
+        LC32_CG_HOST(context), LC32_CG_F32(alpha));
+}
+
 void CGContextSetShouldAntialias(CGContextRef context, bool shouldAntialias) {
     if(context) LC32_CG_CALL(
         LC32CoreGraphicsOpContextSetShouldAntialias,
