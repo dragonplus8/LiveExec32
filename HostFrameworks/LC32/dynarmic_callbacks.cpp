@@ -309,6 +309,15 @@ public:
 #endif
             return value;
         } else {
+            constexpr u32 kFMODPoolWalkFaultPC = 0x120c8468;
+            if (cpu->Regs()[15] == kFMODPoolWalkFaultPC) {
+                fprintf(stderr,
+                    "MemoryRead32[%s->%s:%d]: tolerating known FMOD "
+                    "pool-walk fault at vaddr=0x%x, reporting 0 (treated "
+                    "as end of list)\n",
+                    __FILE__, __func__, __LINE__, vaddr);
+                return 0;
+            }
             fprintf(stderr, "MemoryRead32[%s->%s:%d]: vaddr=0x%x\n", __FILE__, __func__, __LINE__, vaddr);
             // trace = tolerance bad mem access, else crash
             if(trace) {
