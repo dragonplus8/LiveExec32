@@ -111,6 +111,7 @@ int guest_mkdir(u32 guest_path, mode_t mode);
 int guest_setxattr(u32 guest_path, u32 guest_name, u32 guest_value,
                    size_t size, u_int32_t position, int options);
 int guest_sigaction(int signal, u32 guest_action, u32 guest_old_action);
+bool GuestHasNonDefaultSignalDisposition(int sig);
 int guest_sigprocmask(int how, u32 guest_set, u32 guest_old_set);
 int guest_ioctl(int fildes, u32 request, u32 guest_arg);
 int guest_pthread_sigmask(int how, u32 guest_set, u32 guest_old_set);
