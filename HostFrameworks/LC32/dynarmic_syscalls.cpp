@@ -4263,8 +4263,13 @@ int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
         case F_SETOWN:
         case F_RDAHEAD:
         case F_NOCACHE:
-        case F_SETCONFINED:
             return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);
+        case F_SETCONFINED:
+    // F_SETCONFINED is a private Darwin fcntl command (95).
+    // It is part of the guest ABI but is not exposed by the public
+    // iPhoneOS SDK. Don't forward it to the host kernel.
+    return 0;
+        
         case F_FULLFSYNC:
             return debugger_aware_host_wait(
                 [&] {
