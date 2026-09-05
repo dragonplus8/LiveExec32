@@ -61,7 +61,8 @@ LiveExec32Shared_FILES = \
 	../CoreFoundation/CoreFoundation.mm ../CFNetwork/CFNetwork.mm \
 	../Security/Security.mm ../CoreGraphics/CoreGraphics.mm \
 	../CoreText/CoreText.mm ../AudioToolbox/AudioToolbox.mm \
-	../OpenAL/OpenAL.mm ../OpenGLES/OpenGLES.mm ../UIKit/UIKit.mm
+	../OpenAL/OpenAL.mm ../OpenGLES/OpenGLES.mm ../UIKit/UIKit.mm \
+	../CoreVideo/CoreVideo.mm
 LiveExec32Shared_CFLAGS = \
 	-I. -I$(DYNARMIC_ROOT)/src -I../../include -DDYNARMIC_MASTER \
 	-I../../External/mini-gdbstub/include
@@ -71,8 +72,8 @@ LiveExec32Shared_OBJ_FILES = $(DYNARMIC_STATIC_LIBS)
 LiveExec32Shared_LDFLAGS = -L../../External/mini-gdbstub/build
 LiveExec32Shared_LIBRARIES = gdbstub
 LiveExec32Shared_FRAMEWORKS = \
-	AudioToolbox CFNetwork CoreFoundation Foundation GameKit IOKit \
-	OpenAL OpenGLES Security UIKit
+	AudioToolbox CFNetwork CoreFoundation CoreVideo Foundation GameKit \
+	IOKit OpenAL OpenGLES Security UIKit
 LiveExec32Shared_PUBLIC_HEADERS = LiveExec32Shared.h
 LiveExec32Shared_RESOURCE_DIRS = Resources
 LiveExec32Shared_INSTALL_PATH = @rpath
