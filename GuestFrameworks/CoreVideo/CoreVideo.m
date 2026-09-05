@@ -16,6 +16,42 @@
  * ordinary CFRetain/CFRelease, which already understand guest CF proxies.
  */
 
+/*
+ * pixelBufferAttributes dictionary keys. Real CoreVideo's own values are
+ * just the bare, human-readable key names (no "kCVPixelBuffer" prefix) --
+ * the same self-naming convention UIKit uses for its own NSString constants.
+ * These are the actual published values, not placeholders: some of them
+ * (IOSurfaceProperties, OpenGLESCompatibility, etc.) get read back out of
+ * the attributes dictionary by the host's real CVPixelBufferCreate, via
+ * whatever guest->host dictionary translation the CoreFoundation bridge
+ * does for -host_self, so using the real strings here -- rather than
+ * something merely self-consistent -- is the safe choice either way.
+ */
+const CFStringRef kCVPixelBufferPixelFormatTypeKey = CFSTR("PixelFormatType");
+const CFStringRef kCVPixelBufferWidthKey = CFSTR("Width");
+const CFStringRef kCVPixelBufferHeightKey = CFSTR("Height");
+const CFStringRef kCVPixelBufferExtendedPixelsLeftKey =
+    CFSTR("ExtendedPixelsLeft");
+const CFStringRef kCVPixelBufferExtendedPixelsTopKey =
+    CFSTR("ExtendedPixelsTop");
+const CFStringRef kCVPixelBufferExtendedPixelsRightKey =
+    CFSTR("ExtendedPixelsRight");
+const CFStringRef kCVPixelBufferExtendedPixelsBottomKey =
+    CFSTR("ExtendedPixelsBottom");
+const CFStringRef kCVPixelBufferBytesPerRowAlignmentKey =
+    CFSTR("BytesPerRowAlignment");
+const CFStringRef kCVPixelBufferPlaneAlignmentKey = CFSTR("PlaneAlignment");
+const CFStringRef kCVPixelBufferCGBitmapContextCompatibilityKey =
+    CFSTR("CGBitmapContextCompatibility");
+const CFStringRef kCVPixelBufferCGImageCompatibilityKey =
+    CFSTR("CGImageCompatibility");
+const CFStringRef kCVPixelBufferOpenGLESCompatibilityKey =
+    CFSTR("OpenGLESCompatibility");
+const CFStringRef kCVPixelBufferIOSurfacePropertiesKey =
+    CFSTR("IOSurfaceProperties");
+const CFStringRef kCVPixelBufferPoolMinimumBufferCountKey =
+    CFSTR("MinimumBufferCount");
+
 static pthread_once_t LC32CoreVideoDispatcherOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32CoreVideoDispatcherAddress;
 
