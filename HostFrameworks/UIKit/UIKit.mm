@@ -1826,8 +1826,25 @@ extern "C" u32 LC32UIKitHandleLegacyStatusBarOrientation(
     const UIInterfaceOrientation orientation =
         (UIInterfaceOrientation)orientationValue;
     if(!LC32MaskForInterfaceOrientation(orientation)) return 0;
-    LC32LegacyRequestedOrientation.store(
-        orientation, std::memory_order_relaxed);
+    /*
+     * Legacy engines (this one included) commonly re-assert the status bar
+     * orientation every single frame, not only when it changes. Previously
+     * every call here unconditionally re-ran the adopt/apply pipeline below,
+     * which can call -attemptRotationToDeviceOrientation. A real rotation
+     * transition takes ~0.4s -- comfortably longer than one frame -- so if
+     * the next identical per-frame call landed while a transition was still
+     * mid-flight, the geometry hadn't settled, the policy check saw a
+     * mismatch, and it kicked off another rotation instead of letting the
+     * first one finish. Once the requested and physical orientation ever
+     * genuinely diverged once, that became a self-sustaining willRotate/
+     * didRotate loop that never settles. Only re-running the pipeline when
+     * the requested orientation actually changes breaks the loop while
+     * still handling every genuine rotation exactly as before.
+     */
+    const UIInterfaceOrientation previousRequest =
+        (UIInterfaceOrientation)LC32LegacyRequestedOrientation.exchange(
+            orientation, std::memory_order_relaxed);
+    const bool orientationRequestChanged = previousRequest != orientation;
     /* Early game engines can keep the native main thread inside their guest
      * loop indefinitely. Refit synchronously while this legacy setter is
      * already executing on that thread; queuing the only refit would leave
@@ -1844,6 +1861,8 @@ extern "C" u32 LC32UIKitHandleLegacyStatusBarOrientation(
             }
         }
     }
+
+    if(!orientationRequestChanged) return 0;
 
     /* Avoid entering guest shouldAutorotate... while its outgoing direct
      * UIKit host call is still on the JIT stack. */
