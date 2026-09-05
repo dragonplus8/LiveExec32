@@ -127,6 +127,11 @@ OpenGLES_LDFLAGS = \
   -compatibility_version 1.0.0 \
   -current_version 1.0.0
 
+CoreVideo_FRAMEWORKS = LC32
+CoreVideo_LDFLAGS = \
+  -compatibility_version 1.2.0 \
+  -current_version 1.2.0
+
 QuartzCore_FRAMEWORKS = LC32
 QuartzCore_LDFLAGS = \
   -compatibility_version 1.6.0 \
