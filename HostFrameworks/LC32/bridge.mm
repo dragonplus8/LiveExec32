@@ -9,12 +9,15 @@
 #include <atomic>
 #include <array>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <pthread.h>
 #include <stdarg.h>
 #include <string>
+#include <sys/time.h>
 #include <unordered_map>
 #include <vector>
 
@@ -4305,6 +4308,56 @@ static double LC32InvokeGuestSelectorCGRectGuestDoubleHostDouble(
         LC32InvokeGuestSelectorCGRectRaw(self, _cmd, rect));
 }
 
+// Diagnostic-only: appends every guest selector call to a plain text file
+// so activity (or the lack of it) can be inspected after the fact, without
+// needing a live console. Collapses immediate repeats into a single line
+// with a count so a tight loop doesn't flood the file. Safe to remove once
+// the frame-pacing/input investigation is done.
+static void LC32DiagLogSelector(const char *description) {
+    static std::mutex diagLogMutex;
+    static FILE *diagLogFile = nullptr;
+    static char lastDescription[256] = {0};
+    static unsigned long long repeatCount = 0;
+    static bool loggedOnce = false;
+    static bool triedOpen = false;
+
+    std::lock_guard<std::mutex> lock(diagLogMutex);
+    if (!triedOpen) {
+        triedOpen = true;
+        NSArray<NSString *> *paths = NSSearchPathForDirectoriesInDomains(
+            NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *path = paths.firstObject
+            ? [paths.firstObject
+                stringByAppendingPathComponent:@"LC32Diagnostics.log"]
+            : @"/tmp/LC32Diagnostics.log";
+        diagLogFile = fopen(path.UTF8String, "a");
+        if (diagLogFile) {
+            fprintf(diagLogFile, "\n--- LC32 diagnostic log started ---\n");
+            fflush(diagLogFile);
+        }
+    }
+    if (!diagLogFile) return;
+
+    if (loggedOnce && strcmp(description, lastDescription) == 0) {
+        ++repeatCount;
+        return;
+    }
+    if (loggedOnce && repeatCount > 0) {
+        fprintf(diagLogFile, "  (repeated %llu more time%s)\n",
+            repeatCount, repeatCount == 1 ? "" : "s");
+    }
+    struct timeval now;
+    gettimeofday(&now, nullptr);
+    fprintf(diagLogFile, "[%ld.%03ld] %s\n",
+        static_cast<long>(now.tv_sec),
+        static_cast<long>(now.tv_usec / 1000), description);
+    fflush(diagLogFile);
+    strncpy(lastDescription, description, sizeof(lastDescription) - 1);
+    lastDescription[sizeof(lastDescription) - 1] = '\0';
+    repeatCount = 0;
+    loggedOnce = true;
+}
+
 // Keep x2-x7 as explicit parameters, then consume any arguments which the
 // arm64 caller placed on the stack through va_list.
 static u64 LC32InvokeGuestSelectorRaw(id self, SEL _cmd,
@@ -4318,6 +4371,7 @@ static u64 LC32InvokeGuestSelectorRaw(id self, SEL _cmd,
         self && object_isClass(self) ? '+' : '-',
         self ? class_getName(object_getClass(self)) : "(null)",
         _cmd ? sel_getName(_cmd) : "(null)");
+    LC32DiagLogSelector(LC32LastGuestSelectorDescription);
     // FIXME: fast path to get guest selector? cache to hash map?
     u32 guest_cmd = guest_sel_registerName(sel_getName(_cmd));
     Method method = object_isClass(self) ? class_getClassMethod(self, _cmd) : class_getInstanceMethod((Class)[self class], _cmd);
