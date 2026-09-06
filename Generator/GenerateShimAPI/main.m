@@ -877,10 +877,24 @@ static BOOL LC32MethodHasManualAdapter(NSString *className,
          * wraps that callback in a block whose ABI is known to LC32. */
         return YES;
     }
-    if([className isEqualToString:@"NSBundle"] &&
-       !method.isInstanceMethod &&
-       [selector isEqualToString:@"mainBundle"]) {
-        return YES;
+    if([className isEqualToString:@"NSBundle"]) {
+        if(!method.isInstanceMethod &&
+           [selector isEqualToString:@"mainBundle"]) {
+            return YES;
+        }
+        if(!method.isInstanceMethod &&
+           [selector isEqualToString:
+               @"preferredLocalizationsFromArray:"]) {
+            /* Keep Foundation's old PopCap/iOS 6 locale fallback alongside
+             * the manual main-bundle compatibility adapter. */
+            return YES;
+        }
+        if(method.isInstanceMethod &&
+           [selector isEqualToString:@"pathForResource:ofType:"]) {
+            /* iOS Foundation had a PopCap/iOS 6 compatibility path for an
+             * empty resource lookup which modern Foundation removed. */
+            return YES;
+        }
     }
     if([className isEqualToString:@"GKLocalPlayer"] &&
        method.isInstanceMethod &&

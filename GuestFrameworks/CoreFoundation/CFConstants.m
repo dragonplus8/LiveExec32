@@ -45,6 +45,7 @@ const CFRunLoopMode kCFRunLoopDefaultMode =
     CFSTR("kCFRunLoopDefaultMode");
 
 /* These CFStream constants are exported by CoreFoundation on iOS 10. */
+const int kCFStreamErrorDomainSOCKS = 5;
 const CFStringRef kCFStreamPropertyShouldCloseNativeSocket =
     CFSTR("kCFStreamPropertyShouldCloseNativeSocket");
 const CFStreamPropertyKey kCFStreamPropertySocketNativeHandle =

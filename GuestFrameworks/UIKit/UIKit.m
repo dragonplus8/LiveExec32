@@ -3,6 +3,8 @@
 #import <UIKit/UIKit+LC32.h>
 #import <objc/runtime.h>
 
+#include "LC32LegacyCanvas.h"
+
 #include <pthread.h>
 #include <stdio.h>
 
@@ -122,9 +124,10 @@ static pthread_once_t LC32AccessibilityPostOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32HostUIAccessibilityPostNotification;
 static pthread_once_t LC32GuidedAccessOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32HostUIAccessibilityIsGuidedAccessEnabled;
-static pthread_once_t LC32LegacyIPadCanvasOnce = PTHREAD_ONCE_INIT;
+static pthread_once_t LC32LegacyCanvasOnce = PTHREAD_ONCE_INIT;
 static BOOL LC32LegacyIPadCanvasRequired;
 static BOOL LC32LegacyIPadStatusBarHidden;
+static BOOL LC32LegacyPhoneCanvasRequired;
 static pthread_once_t LC32LegacyUniqueIdentifierOnce = PTHREAD_ONCE_INIT;
 static NSString *LC32LegacyUniqueIdentifierFallback;
 
@@ -163,26 +166,25 @@ static void LC32ResolveLegacyUniqueIdentifierFallback(void) {
         ? identifier : @"00000000-0000-0000-0000-000000000000") copy];
 }
 
-static void LC32ResolveLegacyIPadCanvas(void) {
-    NSDictionary *info = NSBundle.mainBundle.infoDictionary;
-    NSArray *families = [info objectForKey:@"UIDeviceFamily"];
-    BOOL supportsPhone = NO;
-    BOOL supportsPad = NO;
-    if([families isKindOfClass:NSArray.class]) {
-        for(id family in families) {
-            if(![family respondsToSelector:@selector(integerValue)]) continue;
-            const NSInteger value = [family integerValue];
-            supportsPhone |= value == 1;
-            supportsPad |= value == 2;
-        }
-    }
-    LC32LegacyIPadCanvasRequired = supportsPad && !supportsPhone;
+static void LC32ResolveLegacyCanvas(void) {
+    NSBundle *bundle = NSBundle.mainBundle;
+    NSDictionary *info = bundle.infoDictionary;
+    const uint64_t getter = LC32Dlsym(
+        "LC32GetGuestExecutableSDKVersion", YES);
+    const uint32_t sdkVersion = getter
+        ? LC32InvokeHostCRet32(getter) : 0;
+    const LC32LegacyIPadCanvasKind canvasKind =
+        LC32BundleLegacyIPadCanvasKind(bundle, sdkVersion);
+    LC32LegacyIPadCanvasRequired =
+        canvasKind != LC32LegacyIPadCanvasNone;
+    LC32LegacyPhoneCanvasRequired = getter &&
+        LC32BundleUsesFixedLandscapePhoneCanvas(bundle, sdkVersion);
     LC32LegacyIPadStatusBarHidden = [[info objectForKey:
         @"UIStatusBarHidden"] boolValue];
 }
 
 static BOOL LC32RequiresLegacyIPadCanvas(void) {
-    pthread_once(&LC32LegacyIPadCanvasOnce, LC32ResolveLegacyIPadCanvas);
+    pthread_once(&LC32LegacyCanvasOnce, LC32ResolveLegacyCanvas);
     return LC32LegacyIPadCanvasRequired;
 }
 
@@ -194,6 +196,11 @@ static BOOL LC32ScreenNeedsLegacyIPadCanvas(CGRect hostBounds) {
      * A smaller value means that an iPad-only guest is running inside a
      * phone/classic host scene and needs a coherent virtual canvas. */
     return shortEdge > 0 && shortEdge < 600;
+}
+
+static BOOL LC32RequiresFixedLandscapePhoneCanvas(void) {
+    pthread_once(&LC32LegacyCanvasOnce, LC32ResolveLegacyCanvas);
+    return LC32LegacyPhoneCanvasRequired;
 }
 
 static CGRect LC32HostScreenRect(UIScreen *screen, SEL selector) {
@@ -683,7 +690,7 @@ compatibleWithTraitCollection:nil];
 
 @end
 
-@implementation UIScreen (LC32LegacyIPadCanvas)
+@implementation UIScreen (LC32LegacyCanvas)
 
 - (CGRect)bounds {
     CGRect bounds = LC32HostScreenRect(self, _cmd);
@@ -697,7 +704,15 @@ compatibleWithTraitCollection:nil];
         bounds.size.height = width;
     }
     if(LC32ScreenNeedsLegacyIPadCanvas(bounds)) {
+        /* Legacy UIScreen coordinates remain portrait-oriented even when the
+         * application supports only landscape. Engines such as PopCap's
+         * apply their own quarter-turn from statusBarOrientation. */
         bounds = CGRectMake(0, 0, 768, 1024);
+    } else if(LC32RequiresFixedLandscapePhoneCanvas()) {
+        /* Pre-iOS-8 UIScreen coordinates stay portrait-oriented. Legacy GL
+         * engines rotate within this surface while the host wrapper presents
+         * it as a 480x320 landscape canvas. */
+        bounds = CGRectMake(0, 0, 320, 480);
     }
     return bounds;
 }
@@ -710,6 +725,10 @@ compatibleWithTraitCollection:nil];
         frame = LC32LegacyIPadStatusBarHidden
             ? CGRectMake(0, 0, 768, 1024)
             : CGRectMake(0, 20, 768, 1004);
+    } else if(LC32RequiresFixedLandscapePhoneCanvas()) {
+        frame = LC32LegacyIPadStatusBarHidden
+            ? CGRectMake(0, 0, 320, 480)
+            : CGRectMake(0, 20, 320, 460);
     }
     return frame;
 }
@@ -723,8 +742,12 @@ compatibleWithTraitCollection:nil];
     static uint64_t hostSelector __attribute__((aligned(8)));
     const uint64_t selector = LC32CachedHostSelector(
         &hostSelector, _cmd, NO);
-    return (CGFloat)LC32HostFloatingResult(LC32InvokeHostSelector(
+    CGFloat scale = (CGFloat)LC32HostFloatingResult(LC32InvokeHostSelector(
         self.host_self, selector, (uint64_t)0));
+    if(LC32RequiresFixedLandscapePhoneCanvas() && scale > 2.0f) {
+        scale = 2.0f;
+    }
+    return scale;
 }
 
 @end

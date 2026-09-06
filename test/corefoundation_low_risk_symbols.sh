@@ -31,6 +31,7 @@ NSStreamSocketSecurityLevelNone
 NSStreamSocketSecurityLevelSSLv2
 NSStreamSocketSecurityLevelSSLv3
 NSStreamSocketSecurityLevelTLSv1
+kCFStreamErrorDomainSOCKS
 kCFStreamPropertySOCKSPassword
 kCFStreamPropertySOCKSProxy
 kCFStreamPropertySOCKSProxyHost
@@ -209,8 +210,8 @@ if [ -s "$work/missing" ]; then
 fi
 
 expected_count=$(wc -l < "$work/expected" | tr -d ' ')
-if [ "$expected_count" -ne 170 ]; then
-    echo "CoreFoundation shortlist baseline changed: expected 170, got $expected_count" >&2
+if [ "$expected_count" -ne 171 ]; then
+    echo "CoreFoundation shortlist baseline changed: expected 171, got $expected_count" >&2
     exit 1
 fi
 

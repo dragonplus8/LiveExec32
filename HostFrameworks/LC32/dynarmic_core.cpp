@@ -1,4 +1,5 @@
 #include "dynarmic_internal.h"
+#include "darwin_file_syscalls.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -243,6 +244,7 @@ void Dynarmic_nativeDestroy() {
         DestroyNativeGuestJit(runtime);
     }
     CloseAllGuestAesFileDescriptors();
+    ClearGuestAioOperations();
 
     Dynarmic::A32::Jit *jit = threadHandle.jit;
     DynarmicCallbacks32 *cb = sharedHandle.cb;

@@ -270,6 +270,8 @@ bool Dynarmic_submit_guest_block_callback(
     const LC32GuestBlockCallbackDescriptor *descriptor);
 bool Dynarmic_submit_guest_function_callback(
     const LC32GuestBlockCallbackDescriptor *descriptor);
+bool Dynarmic_submit_guest_selector_callback(
+    const LC32GuestBlockCallbackDescriptor *descriptor);
 bool Dynarmic_submit_guest_block_release(u32 guest_block);
 u32 LC32GuestCallbackExecutorSupported(u32 unused1, u32 unused2,
                                        u32 unused3);

@@ -34,7 +34,6 @@ LiveExec32_LDFLAGS = \
 	-Wl,-rpath,@loader_path/.jbroot/Applications/LiveExec32.app/Frameworks \
 	-Wl,-rpath,/var/jb/Applications/LiveExec32.app/Frameworks \
 	-Wl,-rpath,/var/jb/usr/lib
-LiveExec32_FRAMEWORKS = UIKit
 LiveExec32_RESOURCE_DIRS = Resources
 
 SHARED_FRAMEWORK_BUILD := \

@@ -965,6 +965,65 @@ static BOOL LC32InvokeGuestBlockCallback(
     return YES;
 }
 
+static BOOL LC32InvokeGuestSelectorCallback(
+        LC32GuestBlockCallbackDescriptor *descriptor) {
+    if(!descriptor || !descriptor->guestBlock || !descriptor->guestInvoke ||
+       descriptor->argumentCount >
+           LC32_GUEST_BLOCK_CALLBACK_MAX_ARGUMENTS ||
+       descriptor->resultKind != LC32GuestBlockValueVoid) {
+        return NO;
+    }
+
+    uint32_t words[LC32_GUEST_BLOCK_CALLBACK_MAX_WORDS] = {
+        descriptor->guestBlock,
+        descriptor->guestInvoke,
+    };
+    uint32_t wordCount = 2;
+    for(uint32_t index = 0; index < descriptor->argumentCount; index++) {
+        LC32GuestBlockCallbackArgument *argument =
+            &descriptor->arguments[index];
+        if(argument->reserved != 0) return NO;
+
+        switch((LC32GuestBlockValueKind)argument->kind) {
+            case LC32GuestBlockValueObject:
+                if(!LC32AppendGuestBlockWord(words, &wordCount,
+                        (uint32_t)(uintptr_t)LC32HostToGuestObject(
+                            argument->value))) return NO;
+                break;
+            case LC32GuestBlockValueSignedChar:
+            case LC32GuestBlockValueSigned32:
+            case LC32GuestBlockValueUnsigned32:
+                if(!LC32AppendGuestBlockWord(
+                        words, &wordCount, (uint32_t)argument->value)) {
+                    return NO;
+                }
+                break;
+            case LC32GuestBlockValueSigned64:
+            case LC32GuestBlockValueUnsigned64:
+                if(!LC32AppendGuestBlockWord(words, &wordCount,
+                        (uint32_t)argument->value) ||
+                   !LC32AppendGuestBlockWord(words, &wordCount,
+                        (uint32_t)(argument->value >> 32))) return NO;
+                break;
+            case LC32GuestBlockValueRange:
+                if(!LC32AppendGuestBlockWord(words, &wordCount,
+                        (uint32_t)argument->value) ||
+                   !LC32AppendGuestBlockWord(words, &wordCount,
+                        (uint32_t)argument->value2)) return NO;
+                break;
+            case LC32GuestBlockValueVoid:
+            case LC32GuestBlockValueCharPointer:
+            default:
+                return NO;
+        }
+    }
+
+    (void)LC32InvokeGuestBlockWords(
+        (uint32_t)(uintptr_t)objc_msgSend, words, wordCount);
+    descriptor->result = 0;
+    return YES;
+}
+
 static BOOL LC32InvokeGuestFunctionCallback(
         LC32GuestBlockCallbackDescriptor *descriptor) {
     if(!descriptor || descriptor->guestBlock || !descriptor->guestInvoke ||
@@ -1047,6 +1106,15 @@ static void *LC32GuestCallbackExecutorMain(
                         fprintf(stderr,
                             "LC32: invalid guest C callback descriptor "
                             "for 0x%x\n", descriptor.guestInvoke);
+                    }
+                    break;
+                case LC32GuestBlockCallbackKindSelector:
+                    if(!LC32InvokeGuestSelectorCallback(&descriptor)) {
+                        fprintf(stderr,
+                            "LC32: invalid guest selector callback "
+                            "descriptor for receiver 0x%x selector 0x%x\n",
+                            descriptor.guestBlock,
+                            descriptor.guestInvoke);
                     }
                     break;
                 default:

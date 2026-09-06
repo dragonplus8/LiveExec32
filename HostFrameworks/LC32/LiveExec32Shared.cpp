@@ -1028,10 +1028,14 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
         sharedHandle.fs->addMountpoint(guestHome, guestHome);
     }
     setenv("LC32_GUEST_HOME", guestHome.c_str(), 1);
-    setenv("LC32_GUEST_EXECUTABLE", execPath, 1);
 
-    // map the main executable first
+    /* Publish the executable only after its load commands have populated the
+     * SDK version. UIKit uses presence of this environment value as the
+     * readiness guard for caching legacy canvas policy, where SDK zero is a
+     * meaningful value for early binaries rather than "not initialized". */
+    guestExecutableSDKVersion = 0;
     u32 execAddr = Dynarmic_map_file(false, 0x11000000, execPath);
+    setenv("LC32_GUEST_EXECUTABLE", execPath, 1);
     LC32ConfigureLegacyAppTransportSecurity(
         guestExecutableSDKVersion);
     

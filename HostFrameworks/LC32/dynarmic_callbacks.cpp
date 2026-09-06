@@ -1500,6 +1500,15 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
             case SYS_fcntl_nocancel:
                 cpu->Regs()[0] = guest_fcntl(cpu->Regs()[0], cpu->Regs()[1], cpu->Regs()[2]);
                 break;
+            case SYS_aio_return:
+                cpu->Regs()[0] = guest_aio_return(cpu->Regs()[0]);
+                break;
+            case SYS_aio_error:
+                cpu->Regs()[0] = guest_aio_error(cpu->Regs()[0]);
+                break;
+            case SYS_aio_read:
+                cpu->Regs()[0] = guest_aio_read(cpu->Regs()[0]);
+                break;
             case SYS_connect: // 98
             case SYS_connect_nocancel: // 409
                 cpu->Regs()[0] = guest_connect(

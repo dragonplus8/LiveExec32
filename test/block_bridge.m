@@ -260,6 +260,37 @@ static uintptr_t LC32AppendCoalescingOperation(
 
 @end
 
+@interface LC32NotificationSelectorProbe : NSObject {
+    NSUInteger _invocationCount;
+    pthread_t _callbackThread;
+}
+
+- (void)workerNotification:(NSNotification *)notification;
+- (NSUInteger)invocationCount;
+- (pthread_t)callbackThread;
+
+@end
+
+@implementation LC32NotificationSelectorProbe
+
+- (void)workerNotification:(NSNotification *)notification {
+    _callbackThread = pthread_self();
+    if([notification.name isEqualToString:
+            @"LC32GuestSelectorWorkerNotification"]) {
+        _invocationCount++;
+    }
+}
+
+- (NSUInteger)invocationCount {
+    return _invocationCount;
+}
+
+- (pthread_t)callbackThread {
+    return _callbackThread;
+}
+
+@end
+
 /*
  * YTBaseService stores completion arrays in a native NSMutableDictionary,
  * keyed by a guest PendingRequestKey.  Foundation consequently calls the
@@ -366,6 +397,53 @@ int main(void) {
         printf("guest-block-queued-object-argument: %s\n",
                queuedNotificationPassed ? "PASS" : "FAIL");
         [notificationQueue release];
+
+        LC32NotificationSelectorProbe *selectorProbe =
+            [LC32NotificationSelectorProbe new];
+        NSString *selectorNotificationName =
+            @"LC32GuestSelectorWorkerNotification";
+        [center addObserver:selectorProbe
+                   selector:@selector(workerNotification:)
+                       name:selectorNotificationName
+                     object:nil];
+        const uint64_t postOnWorker = LC32Dlsym(
+            "LC32TestPostNotificationOnWorker", YES);
+        BOOL selectorWorkerStarted = postOnWorker &&
+            LC32InvokeHostCRet32(postOnWorker, 0, 0, 0);
+        [center removeObserver:selectorProbe
+                         name:selectorNotificationName
+                       object:nil];
+        const BOOL selectorWorkerPassed =
+            selectorWorkerStarted &&
+            selectorProbe.invocationCount == 1 &&
+            !pthread_equal(selectorProbe.callbackThread, mainGuestThread);
+        printf("guest-selector-notification-worker-relay: %s\n",
+               selectorWorkerPassed ? "PASS" : "FAIL");
+
+        if(postOnWorker) {
+            LC32InvokeHostCRet32(postOnWorker, 0, 0, 0);
+        }
+        const BOOL filteredRemovalPassed =
+            selectorProbe.invocationCount == 1;
+        printf("guest-selector-notification-filtered-removal: %s\n",
+               filteredRemovalPassed ? "PASS" : "FAIL");
+
+        [center addObserver:selectorProbe
+                   selector:@selector(workerNotification:)
+                       name:selectorNotificationName
+                     object:nil];
+        if(postOnWorker) {
+            LC32InvokeHostCRet32(postOnWorker, 0, 0, 0);
+        }
+        [center removeObserver:selectorProbe];
+        if(postOnWorker) {
+            LC32InvokeHostCRet32(postOnWorker, 0, 0, 0);
+        }
+        const BOOL broadRemovalPassed =
+            selectorProbe.invocationCount == 2;
+        printf("guest-selector-notification-broad-removal: %s\n",
+               broadRemovalPassed ? "PASS" : "FAIL");
+        [selectorProbe release];
 
         NSMutableArray *coalescedCallbacks = [NSMutableArray array];
         NSMutableArray *coalescedResults = [NSMutableArray array];

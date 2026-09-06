@@ -24,7 +24,7 @@ GENERATED_FRAMEWORKS_STAMP := $(GENERATED_FRAMEWORKS_ROOT)/.complete
 
 ifeq ($(strip $(MAKECMDGOALS)),)
 LC32_REQUIRE_GENERATED_FRAMEWORKS := 1
-else ifneq ($(strip $(filter-out clean generate-shims sdk,$(MAKECMDGOALS))),)
+else ifneq ($(strip $(filter-out clean generate-shims sdk libiconv,$(MAKECMDGOALS))),)
 LC32_REQUIRE_GENERATED_FRAMEWORKS := 1
 endif
 
@@ -43,6 +43,21 @@ ADDITIONAL_CFLAGS = \
   -F$(ISYSROOT)/System/Library/Frameworks/AVFoundation.framework/Frameworks
 ADDITIONAL_LDFLAGS = -fno-autolink -F$(THEOS_OBJ_DIR)
 include $(THEOS)/makefiles/common.mk
+
+LC32_LIBICONV_COMMIT := 6bcfda8c4720659e855c04ce72a8335fb4a67b0b
+LC32_LIBICONV_ARCHIVE ?= \
+  $(LC32_GUEST_SDK_REPO_ROOT)/tmp/libiconv-$(LC32_LIBICONV_COMMIT).tar.gz
+LC32_LIBICONV_URL ?= \
+  https://github.com/apple-oss-distributions/libiconv/archive/$(LC32_LIBICONV_COMMIT).tar.gz
+LC32_LIBICONV_SHA256 ?= \
+  22adfd2a93219669384a0cf603a6a738118015bf2e8d7fb09796ff8eafb192e6
+LC32_LIBICONV_OUTPUT := \
+  $(THEOS_OBJ_DIR)/$(if $(THEOS_CURRENT_ARCH),,$(firstword $(ARCHS))/)libiconv.2.dylib
+LC32_LIBICONV_CHARSET_ALIAS := $(dir $(LC32_LIBICONV_OUTPUT))charset.alias
+LC32_LIBICONV_LICENSE := $(dir $(LC32_LIBICONV_OUTPUT))libiconv.LICENSE
+LC32_LIBICONV_PRODUCTS := $(LC32_LIBICONV_OUTPUT) \
+  $(LC32_LIBICONV_CHARSET_ALIAS) $(LC32_LIBICONV_LICENSE)
+LC32_LIBICONV_CONFIG := $(dir $(LC32_LIBICONV_OUTPUT)).libiconv-config
 
 # THEOS_INSTANCE_NAME is not referenced by the SDK modules. Excluding it from
 # their context hash lets every guest framework share the same MRC/ARC PCMs.
@@ -159,12 +174,43 @@ AdSupport_FILES = $(filter-out \
 generate-shims:
 	./generate-shims.sh
 
+.PHONY: libiconv lc32-libiconv-config-force
+libiconv: $(LC32_LIBICONV_PRODUCTS)
+
+$(LC32_LIBICONV_CONFIG): lc32-libiconv-config-force
+	@set -e; \
+	mkdir -p "$(@D)"; \
+	tmp="$@.$$$$"; \
+	{ \
+		printf '%s\n' "commit=$(LC32_LIBICONV_COMMIT)"; \
+		printf '%s\n' "archive=$(LC32_LIBICONV_ARCHIVE)"; \
+		printf '%s\n' "url=$(LC32_LIBICONV_URL)"; \
+		printf '%s\n' "sha256=$(LC32_LIBICONV_SHA256)"; \
+		printf '%s\n' "sdk=$(abspath $(ISYSROOT))"; \
+	} > "$$tmp"; \
+	if [ -f "$@" ] && cmp -s "$$tmp" "$@"; then \
+		rm -f "$$tmp"; \
+	else \
+		mv -f "$$tmp" "$@"; \
+	fi
+
+$(LC32_LIBICONV_PRODUCTS) &: build-libiconv.sh guest-sdk.mk \
+  $(LC32_GUEST_SDK_DEPENDENCY) $(LC32_LIBICONV_CONFIG)
+	@LC32_GUEST_SDK="$(ISYSROOT)" \
+	LC32_LIBICONV_COMMIT="$(LC32_LIBICONV_COMMIT)" \
+	LC32_LIBICONV_ARCHIVE="$(LC32_LIBICONV_ARCHIVE)" \
+	LC32_LIBICONV_URL="$(LC32_LIBICONV_URL)" \
+	LC32_LIBICONV_SHA256="$(LC32_LIBICONV_SHA256)" \
+	LC32_LIBICONV_OUTPUT="$(LC32_LIBICONV_OUTPUT)" \
+	"$(CURDIR)/build-libiconv.sh"
+
 include $(THEOS_MAKE_PATH)/framework.mk
 
 # Theos can fan framework builds out from internal-all, and its convenience
 # targets bypass before-all. Gate both paths so no compiler observes a partial
 # or missing SDK, including when parallel building is explicitly enabled.
 GUEST_FRAMEWORK_BUILD_TARGETS := $(FRAMEWORK_NAME:=.all.framework.variables)
+before-all:: $(LC32_LIBICONV_PRODUCTS)
 $(FRAMEWORK_NAME) $(GUEST_FRAMEWORK_BUILD_TARGETS): | $(_THEOS_BUILD_SESSION_FILE)
 ifneq ($(strip $(LC32_GUEST_SDK_DEPENDENCY)),)
 before-all:: $(LC32_GUEST_SDK_DEPENDENCY)

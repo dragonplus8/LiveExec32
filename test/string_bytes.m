@@ -50,6 +50,25 @@ int main(void) {
     printf("string-get-characters-all: %s\n",
            allCharactersPassed ? "PASS" : "FAIL");
 
+    const char *utf32 = [@"1.9.11"
+        cStringUsingEncoding:NSUTF32LittleEndianStringEncoding];
+    const unsigned char expectedUTF32[] = {
+        '1', 0, 0, 0, '.', 0, 0, 0, '9', 0, 0, 0, '.', 0, 0, 0,
+        '1', 0, 0, 0, '1', 0, 0, 0, 0, 0, 0, 0,
+    };
+    BOOL utf32Passed = utf32 &&
+        memcmp(utf32, expectedUTF32, sizeof(expectedUTF32)) == 0;
+    printf("string-cstring-utf32-terminator: %s\n",
+           utf32Passed ? "PASS" : "FAIL");
+
+    const char *emptyUTF32 = [@""
+        cStringUsingEncoding:NSUTF32LittleEndianStringEncoding];
+    const uint32_t emptyUTF32Value = emptyUTF32
+        ? *(const uint32_t *)emptyUTF32 : UINT32_MAX;
+    BOOL emptyUTF32Passed = emptyUTF32 && emptyUTF32Value == 0;
+    printf("string-cstring-empty-utf32-terminator: %s\n",
+           emptyUTF32Passed ? "PASS" : "FAIL");
+
     char *ownedBytes = malloc(6);
     memcpy(ownedBytes, "owned", 6);
     NSString *owned = [[NSString alloc]
@@ -64,5 +83,6 @@ int main(void) {
 
     [pool drain];
     return !(utf8Passed && latin1Passed && charactersPassed &&
-             allCharactersPassed && noCopyPassed);
+             allCharactersPassed && utf32Passed && emptyUTF32Passed &&
+             noCopyPassed);
 }

@@ -97,6 +97,7 @@ endef
 # its old build_main_only.sh linked an ambient SDK into test/a.out, so it is
 # intentionally retired instead of becoming part of this reproducible suite.
 $(eval $(call lc32_test,lc32-aes-ioctl-abi,aes_ioctl_abi.c,))
+$(eval $(call lc32_test,lc32-aio-read,aio_read.c,))
 $(eval $(call lc32_test,lc32-bind-abi,bind_abi.c,))
 $(eval $(call lc32_test,lc32-connect-nocancel,connect_nocancel.c connect_nocancel.S,))
 $(eval $(call lc32_test,lc32-cwd-syscalls,cwd_syscalls.c,))
@@ -108,6 +109,7 @@ $(eval $(call lc32_test,lc32-fcntl-filesigs-return,fcntl_filesigs_return.c,))
 $(eval $(call lc32_test,lc32-getsockname-abi,getsockname_abi.c,))
 $(eval $(call lc32_test,lc32-getsockopt-abi,getsockopt_abi.c,))
 $(eval $(call lc32_test,lc32-host-info,host_info.c,))
+$(eval $(call lc32_test,lc32-iconv-smoke,iconv_smoke.c,))
 $(eval $(call lc32_test,lc32-kqueue-kevent,kqueue_kevent.c,))
 $(eval $(call lc32_test,lc32-lseek-abi,lseek_abi.c,))
 $(eval $(call lc32_test,lc32-mremap-encrypted,mremap_encrypted.c,))
@@ -122,12 +124,14 @@ $(eval $(call lc32_test,lc32-vm-copy,vm_copy.c,))
 $(eval $(call lc32_test,lc32-vm-purgable,vm_purgable.c,))
 
 # AudioToolbox.
+$(eval $(call lc32_guest_test,lc32-audio-converter,audio_converter.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-file-create-packets,audio_file_create_packets.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-file-smoke,audio_file_smoke.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-queue-input,audio_queue_input.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-queue-output,audio_queue_output.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-session,audio_session.c,AudioToolbox CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-audio-unit-output,audio_unit_output.c,AudioToolbox CoreFoundation LC32))
+$(eval $(call lc32_guest_test,lc32-audio-unit-spatial-mixer,audio_unit_spatial_mixer.c,AudioToolbox CoreFoundation LC32))
 
 # Foundation, CoreFoundation, and bridge behavior.
 $(eval $(call lc32_guest_test,lc32-addressbook-compat,addressbook_compat.m,AddressBook Foundation CoreFoundation))
@@ -156,6 +160,7 @@ $(eval $(call lc32_guest_test,lc32-corefoundation-url-common,corefoundation_url_
 $(eval $(call lc32_guest_test,lc32-corefoundation-uuid,corefoundation_uuid.c,Foundation CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-corefoundation-write-stream,corefoundation_write_stream.m,Foundation CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-coremedia-time-values,coremedia_time_values.c,CoreMedia CoreFoundation Foundation))
+$(eval $(call lc32_guest_test,lc32-coredata-merge-policy,coredata_merge_policy.m,CoreData Foundation CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-cxx-lifecycle,cxx_lifecycle.mm,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-data-bytes,data_bytes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-fast-enumeration,fast_enumeration.m,Foundation))
@@ -166,6 +171,7 @@ $(eval $(call lc32_guest_test,lc32-foundation-zone,foundation_zone.m,Foundation)
 $(eval $(call lc32_guest_test,lc32-guest-proxy-lifetime,guest_proxy_lifetime.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-kvo-bridge,kvo_bridge.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-mobilecoreservices-uti,mobilecoreservices_uti.m,MobileCoreServices CoreFoundation))
+$(eval $(call lc32_guest_test,lc32-mediaplayer-legacy,mediaplayer_legacy.m,MediaPlayer CFNetwork Foundation CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-nsrange-bridge,nsrange_bridge.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-nsvalue-bytes,nsvalue_bytes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-nullable-guest-cstring,nullable_guest_cstring.c,LC32))
@@ -240,6 +246,8 @@ lc32-uikit-legacy-window-root_CFLAGS := -fno-objc-arc -Wall -Wextra -Werror
 
 lc32-cxx-lifecycle_CCFLAGS := -std=c++14
 
+lc32-iconv-smoke_LDFLAGS += -liconv
+
 lc32-guest-proxy-lifetime_CFLAGS := -I$(abspath ../include)
 lc32-nsrange-bridge_USE_MODULES := 1
 lc32-nsrange-bridge_CFLAGS := -I$(abspath ../GuestFrameworks) -I$(abspath ../include)
@@ -251,9 +259,11 @@ lc32-audio-queue-input_CFLAGS := -Wno-deprecated-declarations
 lc32-audio-queue-output_CFLAGS := -Wno-deprecated-declarations -Wno-nonnull
 lc32-audio-session_CFLAGS := -Wno-deprecated-declarations
 lc32-audio-unit-output_CFLAGS := -Wno-deprecated-declarations
+lc32-audio-unit-spatial-mixer_CFLAGS := -Wno-deprecated-declarations
 lc32-darwin-eperm_CFLAGS := -Wno-deprecated-declarations
 lc32-darwin-safe-syscalls_CFLAGS := -Wno-deprecated-declarations
 lc32-mremap-encrypted_CFLAGS := -Wno-deprecated-declarations
+lc32-mediaplayer-legacy_CFLAGS := -Wno-deprecated-declarations
 lc32-security-secitem_CFLAGS := -Wno-deprecated-declarations -Wno-nonnull
 lc32-socket-accept-abi_CFLAGS := -Wno-deprecated-declarations
 lc32-uikit-appearance_CFLAGS := -Wno-deprecated-declarations

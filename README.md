@@ -35,7 +35,7 @@ gmake
 gmake -C GuestMakefile generate-shims
 gmake -C GuestMakefile
 ```
-  With GNU Make 4 or newer, independent frameworks and their source files are
+  With GNU Make 4.3 or newer, independent frameworks and their source files are
   built through the shared jobserver; pass `-jN` to cap concurrency. Guest
   frameworks also share the SDK's MRC/ARC Clang module contexts, keeping a
   cold module cache compact. Set `LC32_SHARE_GUEST_MODULE_CACHE=0` only when
@@ -50,6 +50,14 @@ gmake -C GuestMakefile
   subject to Apple's SDK terms. Run `gmake -C GuestMakefile sdk` to prefetch
   it without building. Theos still needs its separate iPhoneOS 16.5 SDK to
   link the project.
+
+  The same build also downloads and verifies Apple's `libiconv-50` source at
+  commit `6bcfda8c4720659e855c04ce72a8335fb4a67b0b`, then builds the armv7s
+  `/usr/lib/libiconv.2.dylib` used by older apps. The source and archive are
+  cached under `tmp/`; run `gmake -C GuestMakefile libiconv` to build only
+  that library. This library remains covered by the LGPL license shipped in
+  Apple's source archive; the guest root includes that license at
+  `/usr/local/OpenSourceLicenses/libiconv.txt`.
 - Set up the guest root filesystem and install the built shim frameworks:
 ```bash
 ./GuestMakefile/pack-ramdisk.sh

@@ -106,7 +106,34 @@ NSRange NSRangeFromString(NSString *string) {
 @implementation NSTaggedPointerString : NSString
 @end
 
-@implementation NSBundle (LC32GuestMainBundle)
+static pthread_once_t LC32PopCapBundleCompatibilityOnce = PTHREAD_ONCE_INIT;
+static BOOL LC32UsesPopCapBundleCompatibility;
+
+static void LC32ResolvePopCapBundleCompatibility(void) {
+    const uint64_t getter = LC32Dlsym(
+        "LC32GetGuestExecutableSDKVersion", YES);
+    const uint32_t sdkVersion = getter
+        ? LC32InvokeHostCRet32(getter) : 0;
+    NSString *bundleIdentifier = [NSBundle mainBundle].bundleIdentifier;
+
+    /* Foundation 10.3.3 retained this compatibility behavior for PopCap
+     * executables linked against the iOS 6 SDK or earlier.  An unknown SDK
+     * is represented by zero and was treated as an old executable too. */
+    LC32UsesPopCapBundleCompatibility =
+        (sdkVersion >> 16) <= 6 &&
+        [bundleIdentifier hasPrefix:@"com.popcap."];
+}
+
+static BOOL LC32GuestUsesPopCapBundleCompatibility(void) {
+    pthread_once(&LC32PopCapBundleCompatibilityOnce,
+        LC32ResolvePopCapBundleCompatibility);
+    return LC32UsesPopCapBundleCompatibility;
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+
+@implementation NSBundle (LC32GuestBundleCompatibility)
 
 + (NSBundle *)mainBundle {
     /*
@@ -118,7 +145,64 @@ NSRange NSRangeFromString(NSString *string) {
     return (NSBundle *)CFBundleGetMainBundle();
 }
 
++ (NSArray<NSString *> *)preferredLocalizationsFromArray:
+        (NSArray<NSString *> *)localizationsArray {
+    static uint64_t hostSelector __attribute__((aligned(8)));
+    const uint64_t selector = LC32CachedHostSelector(
+        &hostSelector, _cmd, NO);
+    id hostResult = LC32InvokeHostObjectSelector(
+        self.host_self, selector, localizationsArray.host_self,
+        (uint64_t)0);
+    NSArray<NSString *> *preferred =
+        LC32ReturnBorrowedGuestObject(hostResult);
+
+    if(!LC32GuestUsesPopCapBundleCompatibility()) {
+        return preferred;
+    }
+
+    NSBundle *guestBundle = [NSBundle mainBundle];
+    NSArray<NSString *> *bundleLocalizations =
+        [guestBundle localizations];
+    NSString *selectedLocalization = [preferred firstObject];
+    if(selectedLocalization &&
+            [bundleLocalizations containsObject:selectedLocalization]) {
+        return preferred;
+    }
+
+    /* Some early PopCap titles pass AppleLanguages here instead of the
+     * bundle's supported localizations.  Newer Foundation can consequently
+     * select an unsupported device language, while those titles only split
+     * locale names on underscores and never reach their shipped fallback.
+     * Keep the workaround inside Foundation's existing PopCap/iOS 6 gate. */
+    NSArray<NSString *> *bundlePreferred =
+        [guestBundle preferredLocalizations];
+    return [bundlePreferred count] != 0 ? bundlePreferred : preferred;
+}
+
+- (NSString *)pathForResource:(NSString *)name
+                       ofType:(NSString *)extension {
+    /*
+     * Reproduce Foundation's old PopCap compatibility path exactly: an empty
+     * name and extension resolve to the first plist.  PvZ then takes that
+     * file's containing directory as its resource folder.
+     */
+    if(LC32GuestUsesPopCapBundleCompatibility() &&
+            [name length] == 0 && [extension length] == 0) {
+        return [self pathForResource:nil ofType:@"plist"];
+    }
+
+    static uint64_t hostSelector __attribute__((aligned(8)));
+    const uint64_t selector = LC32CachedHostSelector(
+        &hostSelector, _cmd, NO);
+    id result = LC32InvokeHostObjectSelector(
+        self.host_self, selector, name.host_self, extension.host_self,
+        (uint64_t)0);
+    return LC32ReturnBorrowedGuestObject(result);
+}
+
 @end
+
+#pragma clang diagnostic pop
 
 void NSLogv(NSString *format, va_list arguments) {
     if(!format) return;

@@ -53,6 +53,7 @@ NSURLSessionTaskPriorityDefault Foundation CFNetwork
 NSURLSessionTaskPriorityHigh Foundation CFNetwork
 NSURLSessionTaskPriorityLow Foundation CFNetwork
 NSURLSessionTransferSizeUnknown Foundation CFNetwork
+kCFStreamErrorDomainSOCKS CFNetwork CoreFoundation
 kCFStreamPropertySOCKSPassword CFNetwork CoreFoundation
 kCFStreamPropertySOCKSProxy CFNetwork CoreFoundation
 kCFStreamPropertySOCKSProxyHost CFNetwork CoreFoundation
@@ -71,8 +72,8 @@ kCFStreamSocketSecurityLevelTLSv1 CFNetwork CoreFoundation
 EOF
 
 expected_count=$(wc -l < "$work/expected" | tr -d ' ')
-if [ "$expected_count" -ne 59 ]; then
-    echo "Framework ownership manifest changed: expected 59 moves, got $expected_count" >&2
+if [ "$expected_count" -ne 60 ]; then
+    echo "Framework ownership manifest changed: expected 60 moves, got $expected_count" >&2
     exit 1
 fi
 

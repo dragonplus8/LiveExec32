@@ -275,4 +275,58 @@ else
     ln -s "$avfaudio_target" "$avfaudio_link"
 fi
 
-echo "Installed and verified $framework_count guest frameworks in $RAMDISK_ROOT"
+libiconv_source="$BUILD_ROOT/libiconv.2.dylib"
+libiconv_destination="$RAMDISK_ROOT/usr/lib/libiconv.2.dylib"
+charset_alias_source="$BUILD_ROOT/charset.alias"
+libiconv_license_source="$BUILD_ROOT/libiconv.LICENSE"
+if [ ! -f "$libiconv_source" ]; then
+    echo "Missing built guest library: $libiconv_source" >&2
+    exit 1
+fi
+if [ ! -f "$charset_alias_source" ]; then
+    echo "Missing built guest library data: $charset_alias_source" >&2
+    exit 1
+fi
+if [ ! -f "$libiconv_license_source" ]; then
+    echo "Missing guest libiconv license: $libiconv_license_source" >&2
+    exit 1
+fi
+if ! file "$libiconv_source" | grep -q 'arm_v7s'; then
+    echo "Guest libiconv is not armv7s: $libiconv_source" >&2
+    exit 1
+fi
+libiconv_id=$(otool -D "$libiconv_source" | tail -n 1)
+if [ "$libiconv_id" != /usr/lib/libiconv.2.dylib ]; then
+    echo "Unexpected guest libiconv install name: $libiconv_id" >&2
+    exit 1
+fi
+
+install -d -m 0755 "$RAMDISK_ROOT/usr/lib"
+install -m 0755 "$libiconv_source" "$libiconv_destination"
+install -m 0644 "$charset_alias_source" "$RAMDISK_ROOT/usr/lib/charset.alias"
+install -d -m 0755 "$RAMDISK_ROOT/usr/local/OpenSourceLicenses"
+install -m 0644 "$libiconv_license_source" \
+    "$RAMDISK_ROOT/usr/local/OpenSourceLicenses/libiconv.txt"
+
+ensure_compatibility_symlink() {
+    link_path=$1
+    link_target=$2
+    if [ -L "$link_path" ]; then
+        if [ "$(readlink "$link_path")" != "$link_target" ]; then
+            echo "Unexpected libiconv compatibility symlink: $link_path" >&2
+            exit 1
+        fi
+    elif [ -e "$link_path" ]; then
+        echo "Refusing to replace non-symlink path: $link_path" >&2
+        exit 1
+    else
+        ln -s "$link_target" "$link_path"
+    fi
+}
+
+ensure_compatibility_symlink \
+    "$RAMDISK_ROOT/usr/lib/libiconv.2.4.0.dylib" libiconv.2.dylib
+ensure_compatibility_symlink \
+    "$RAMDISK_ROOT/usr/lib/libiconv.dylib" libiconv.2.4.0.dylib
+
+echo "Installed and verified $framework_count guest frameworks and libiconv in $RAMDISK_ROOT"
