@@ -2175,8 +2175,30 @@ u32 LC32CopyHostDataBytes(u64 host_object, u32 guest_output, u32 length,
 
 u64 LC32Dlsym(u32 guest_name, bool isFunction) {
     DynarmicHostString host_name(guest_name);
-    
+
     u64 r = (u64)dlsym(RTLD_DEFAULT, host_name.hostPtr);
+    if(!r) {
+        /*
+         * CoreData.framework is never a link-time dependency of the host
+         * app -- nothing on this side calls a real CoreData API directly,
+         * only these guest-side string constants ever ask for one -- so
+         * whether it has been mapped into the process yet depends on
+         * whatever else happened to transitively pull it in first. That
+         * makes the guest CoreData shim's dyld constructor racy: it runs
+         * very early, during the guest app's own module-init pass, and
+         * can find these symbols fine on some launches and fail on
+         * others, aborting the whole guest process via bindHostSelf:'s
+         * null check. Force the image to be mapped before giving up;
+         * dlopen on an already-loaded image is a cheap no-op, and this
+         * only ever runs on a miss, so it doesn't affect any lookup that
+         * already resolves via RTLD_DEFAULT. Same pattern as
+         * ResolveHostIOKitSymbol above, for the same underlying reason.
+         */
+        static void *const coreDataHandle = dlopen(
+            "/System/Library/Frameworks/CoreData.framework/CoreData",
+            RTLD_LAZY | RTLD_LOCAL);
+        if(coreDataHandle) r = (u64)dlsym(coreDataHandle, host_name.hostPtr);
+    }
     if(r && !isFunction) r = *(u64*)r;
     printf("LC32: dlsym %s = 0x%llx\n", host_name.hostPtr, r);
     return r;
