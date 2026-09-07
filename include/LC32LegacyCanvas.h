@@ -285,4 +285,22 @@ static inline BOOL LC32BundleUsesFixedLandscapePhoneCanvas(
         LC32BundleDeclaresStableLandscapeSide(bundle);
 }
 
+/* Some pre-iOS-8 phone-only games ship 568-point launch art but continue to
+ * create a 480x320 drawable at runtime. Metadata alone cannot distinguish
+ * them from normal 568x320 applications, so use this only as a stable gate
+ * before checking the loaded controller's exact native bounds. */
+static inline BOOL LC32BundleMayRetainLegacyLandscapePhoneCanvas(
+        NSBundle *bundle, uint32_t sdkVersion) {
+    const LC32SupportedDeviceFamilies families =
+        LC32BundleSupportedDeviceFamilies(bundle);
+    if(!families.supportsPhone || families.supportsPad ||
+            sdkVersion >= 0x00080000) {
+        return NO;
+    }
+    NSDictionary *info = [bundle infoDictionary];
+    return LC32BundleContainsTallPhoneLaunchArt(bundle, info) &&
+        LC32BundleUsesLandscapeOnlyPhonePolicy(bundle) &&
+        LC32BundleDeclaresStableLandscapeSide(bundle);
+}
+
 #endif

@@ -29,6 +29,18 @@
 
 @end
 
+@implementation GKLeaderboard (LC32LegacyPropertyCompatibility)
+
+- (NSString *)category {
+    return self.identifier;
+}
+
+- (void)setCategory:(NSString *)category {
+    self.identifier = category;
+}
+
+@end
+
 @implementation GKLocalPlayer (LC32LegacyBlockCompatibility)
 
 - (void)authenticateWithCompletionHandler:

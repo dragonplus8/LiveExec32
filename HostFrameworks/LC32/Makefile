@@ -72,7 +72,7 @@ LiveExec32Shared_LDFLAGS = -L../../External/mini-gdbstub/build
 LiveExec32Shared_LIBRARIES = gdbstub
 LiveExec32Shared_FRAMEWORKS = \
 	AudioToolbox CFNetwork CoreFoundation Foundation GameKit IOKit \
-	OpenAL OpenGLES Security UIKit
+	OpenAL OpenGLES QuartzCore Security UIKit
 LiveExec32Shared_PUBLIC_HEADERS = LiveExec32Shared.h
 LiveExec32Shared_RESOURCE_DIRS = Resources
 LiveExec32Shared_INSTALL_PATH = @rpath

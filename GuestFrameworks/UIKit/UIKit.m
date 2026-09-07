@@ -569,6 +569,17 @@ void UIImageWriteToSavedPhotosAlbum(UIImage *image,
 
 @implementation UIWindow (LC32MainThreadRootViewController)
 
+- (void)addSubview:(UIView *)view {
+    /* setRootViewController: already owns and installs this view. Some old
+     * applications redundantly add it to the window immediately afterwards;
+     * moving it out of LiveExec32's compatibility container would violate
+     * UIKit's controller-parent invariant. */
+    UIViewController *rootController = self.rootViewController;
+    if(view && rootController.isViewLoaded &&
+            rootController.view == view && view.superview != self) return;
+    [super addSubview:view];
+}
+
 - (UIViewController *)rootViewController {
     pthread_once(&LC32UIKitGeometryOnce,
         LC32UIKitResolveGeometryFunctions);
