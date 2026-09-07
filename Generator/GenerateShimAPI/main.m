@@ -38,6 +38,10 @@ static BOOL LC32EncodingIsOpaqueCFObjectPointer(const char *encoding) {
     encoding = LC32UnqualifiedEncoding(encoding);
     if(!encoding || encoding[0] != '^' || encoding[1] != '{') return NO;
 
+    /* CoreGraphics exposes this Objective-C-compatible CF object as
+     * CGColorRef, but its runtime encoding only preserves `CGColor *`. */
+    if(LC32EncodingRepresentsCGColorRef(encoding)) return YES;
+
     const char *name = encoding + 2;
     static const char *const prefixes[] = {
         "__C3D", "__CF", "__CLClient", "__CN", "__CT", "__CV",
@@ -90,6 +94,7 @@ static LC32KnownStruct LC32KnownStructForEncoding(const char *encoding) {
 // FIXME: will need to parse header to return correctly. On 64bit, NS*Integer and CGFloat are not distinguishable from 32bit
 + (NSString *)readableTypeForSignature:(const char *)signature {
     if(!signature || !*signature) return @"?";
+    if(LC32EncodingRepresentsCGColorRef(signature)) return @"CGColorRef";
     if(LC32EncodingIsOpaqueCFObjectPointer(signature)) {
         /* Runtime qualifiers can precede the pointer encoding (for example
          * r^{__CF...}).  Generated code only needs an address-sized token;
@@ -605,11 +610,15 @@ static BOOL LC32MethodReturnsOwnedResult(NSString *className,
 
 - (NSString *)callLine {
     NSMutableString *call = [NSMutableString new];
+    const BOOL returnsBorrowedOpaqueObject =
+        LC32EncodingIsOpaqueCFObjectPointer(self.method.returnType) &&
+        !LC32MethodReturnsOwnedResult(self.className, self.method);
     const BOOL returnsBorrowedObject =
         self.method.returnType[0] == '#' ||
         (self.method.returnType[0] == '@' &&
          !LC32MethodIsInInitFamily(self.method) &&
-         !LC32MethodReturnsOwnedResult(self.className, self.method));
+         !LC32MethodReturnsOwnedResult(self.className, self.method)) ||
+        returnsBorrowedOpaqueObject;
     if(self.method.returnType[0] == 'v') {
         [call appendString:@"(void)LC32InvokeHostSelector(self.host_self, host_cmd"];
     } else if(self.method.returnType[0] == '{') {
@@ -688,7 +697,7 @@ static BOOL LC32MethodReturnsOwnedResult(NSString *className,
                 self.returnType];
         }
         return [NSString stringWithFormat:
-            @"return (__bridge %@)LC32HostToGuestObject(host_ret);",
+            @"return (__bridge %@)guest_ret;",
             self.returnType];
     }
 
@@ -930,8 +939,6 @@ static BOOL LC32MethodHasManualAdapter(NSString *className,
          ([selector isEqualToString:@"bounds"] ||
           [selector isEqualToString:@"applicationFrame"] ||
           [selector isEqualToString:@"scale"])) ||
-        ([className isEqualToString:@"UIColor"] &&
-         [selector isEqualToString:@"CGColor"]) ||
         ([className isEqualToString:@"UIWebView"] &&
          [selector isEqualToString:@"loadRequest:"]) ||
         ([className isEqualToString:@"UIWindow"] &&
@@ -1183,9 +1190,6 @@ static BOOL LC32MethodHasIndirectObjectBuffer(NSString *className,
     }
     if([self.className isEqualToString:@"UIScreen"]) {
         [string appendString:@"@dynamic bounds, applicationFrame, scale;\n"];
-    }
-    if([self.className isEqualToString:@"UIColor"]) {
-        [string appendString:@"@dynamic CGColor;\n"];
     }
     if([self.className isEqualToString:@"UIWindow"]) {
         [string appendString:@"@dynamic rootViewController;\n"];

@@ -328,8 +328,22 @@ static NSString *LC32ReadableObjectType(const char *encoding) {
     return [name stringByAppendingString:@" *"];
 }
 
+BOOL LC32EncodingRepresentsCGColorRef(const char *encoding) {
+    while(encoding && *encoding && strchr("rnNoORVA", *encoding)) {
+        encoding++;
+    }
+    if(!encoding || encoding[0] != '^' || encoding[1] != '{') return NO;
+
+    const char *name = encoding + 2;
+    static const char cgColorName[] = "CGColor";
+    return !strncmp(name, cgColorName, sizeof(cgColorName) - 1) &&
+        (name[sizeof(cgColorName) - 1] == '=' ||
+         name[sizeof(cgColorName) - 1] == '}');
+}
+
 NSString *LC32ReadableTypeForEncoding(const char *encoding) {
     if(!encoding || !*encoding) return @"?";
+    if(LC32EncodingRepresentsCGColorRef(encoding)) return @"CGColorRef";
 
     if(*encoding == '"') {
         BOOL valid = YES;
