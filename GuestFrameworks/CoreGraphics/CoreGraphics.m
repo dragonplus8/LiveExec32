@@ -9,6 +9,10 @@
 #include <math.h>
 #include <string.h>
 
+@interface NSObject (LC32CoreGraphicsOwnership)
+- (void)LC32_releaseGuestOwnershipOnly;
+@end
+
 static pthread_once_t LC32CoreGraphicsDispatcherOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32CoreGraphicsDispatcherAddress;
 
@@ -62,6 +66,13 @@ CGColorRef CGColorCreate(CGColorSpaceRef space, const CGFloat *components) {
     return (CGColorRef)LC32_CG_CALL(LC32CoreGraphicsOpColorCreate,
         LC32_CG_HOST(space), LC32_CG_U32((uintptr_t)components));
 }
+bool CGColorEqualToColor(CGColorRef color1, CGColorRef color2) {
+    if(color1 == color2) return true;
+    if(!color1 || !color2) return false;
+    return LC32_CG_CALL(LC32CoreGraphicsOpColorEqualToColor,
+        LC32_CG_HOST(color1), LC32_CG_HOST(color2)) != 0;
+}
+
 void CGColorRelease(CGColorRef color) {
     if(color) CFRelease(color);
 }
@@ -168,6 +179,16 @@ CGDataProviderRef CGDataProviderCreateWithCFData(CFDataRef data) {
         LC32_CG_HOST(data)) : NULL;
 }
 
+CGDataProviderRef CGDataProviderCreateWithData(void *info,
+        const void *data, size_t size,
+        CGDataProviderReleaseDataCallback releaseData) {
+    if(size && !data) return NULL;
+    return (CGDataProviderRef)LC32_CG_CALL(
+        LC32CoreGraphicsOpDataProviderCreateWithData,
+        LC32_CG_U32((uintptr_t)info), LC32_CG_U32((uintptr_t)data),
+        LC32_CG_U32(size), LC32_CG_U32((uintptr_t)releaseData));
+}
+
 CGImageRef CGImageCreate(size_t width, size_t height,
         size_t bitsPerComponent, size_t bitsPerPixel, size_t bytesPerRow,
         CGColorSpaceRef space, CGBitmapInfo bitmapInfo,
@@ -188,8 +209,65 @@ CGImageRef CGImageCreate(size_t width, size_t height,
 
 void CGDataProviderRelease(CGDataProviderRef provider) {
     if(!provider) return;
-    CFRelease(provider);
+    /* Native providers do not always support Objective-C weak promotion.
+     * Consume the caller-owned reference through the typed CF API, while
+     * maintaining the corresponding guest ownership count exactly once. */
+    const uint64_t hostProvider = LC32_CG_HOST(provider);
+    [(id)provider LC32_releaseGuestOwnershipOnly];
+    LC32_CG_CALL(LC32CoreGraphicsOpDataProviderRelease, hostProvider);
 }
+
+CGDataProviderRef CGDataProviderRetain(CGDataProviderRef provider) {
+    return provider ? (CGDataProviderRef)LC32_CG_CALL(
+        LC32CoreGraphicsOpDataProviderRetain,
+        LC32_CG_HOST(provider)) : NULL;
+}
+
+#pragma mark CGFont
+
+CGFontRef CGFontCreateWithDataProvider(CGDataProviderRef provider) {
+    return provider ? (CGFontRef)LC32_CG_CALL(
+        LC32CoreGraphicsOpFontCreateWithDataProvider,
+        LC32_CG_HOST(provider)) : NULL;
+}
+
+CGFontRef CGFontRetain(CGFontRef font) {
+    return font ? (CGFontRef)CFRetain(font) : NULL;
+}
+
+void CGFontRelease(CGFontRef font) {
+    if(font) CFRelease(font);
+}
+
+CFDataRef CGFontCopyTableForTag(CGFontRef font, uint32_t tag) {
+    return font ? (CFDataRef)LC32_CG_CALL(
+        LC32CoreGraphicsOpFontCopyTableForTag,
+        LC32_CG_HOST(font), LC32_CG_U32(tag)) : NULL;
+}
+
+#define LC32_CG_FONT_METRIC(name) \
+    int CGFont##name(CGFontRef font) { \
+        return font ? (int32_t)LC32_CG_CALL( \
+            LC32CoreGraphicsOpFont##name, LC32_CG_HOST(font)) : 0; \
+    }
+
+LC32_CG_FONT_METRIC(GetUnitsPerEm)
+LC32_CG_FONT_METRIC(GetAscent)
+LC32_CG_FONT_METRIC(GetDescent)
+LC32_CG_FONT_METRIC(GetCapHeight)
+LC32_CG_FONT_METRIC(GetXHeight)
+
+#undef LC32_CG_FONT_METRIC
+
+bool CGFontGetGlyphAdvances(CGFontRef font, const CGGlyph *glyphs,
+                            size_t count, int *advances) {
+    if(!font || (count && (!glyphs || !advances))) return false;
+    return LC32_CG_CALL(LC32CoreGraphicsOpFontGetGlyphAdvances,
+        LC32_CG_HOST(font), LC32_CG_U32((uintptr_t)glyphs),
+        LC32_CG_U32(count), LC32_CG_U32((uintptr_t)advances)) != 0;
+}
+
+#pragma mark CGImage
 
 CGImageRef CGImageCreateWithJPEGDataProvider(
         CGDataProviderRef source, const CGFloat *decode,
@@ -270,6 +348,16 @@ void CGContextDrawImage(CGContextRef context, CGRect rect,
         LC32_CG_HOST(image));
 }
 
+void CGContextDrawTiledImage(CGContextRef context, CGRect rect,
+                             CGImageRef image) {
+    if(!context || !image) return;
+    LC32_CG_CALL(LC32CoreGraphicsOpContextDrawTiledImage,
+        LC32_CG_HOST(context),
+        LC32_CG_F32(rect.origin.x), LC32_CG_F32(rect.origin.y),
+        LC32_CG_F32(rect.size.width), LC32_CG_F32(rect.size.height),
+        LC32_CG_HOST(image));
+}
+
 void CGContextDrawLinearGradient(CGContextRef context,
                                  CGGradientRef gradient,
                                  CGPoint startPoint, CGPoint endPoint,
@@ -336,6 +424,43 @@ void CGContextRestoreGState(CGContextRef context) {
 void CGContextBeginPath(CGContextRef context) {
     if(context) LC32_CG_CALL(LC32CoreGraphicsOpContextBeginPath,
         LC32_CG_HOST(context));
+}
+
+void CGContextBeginTransparencyLayer(CGContextRef context,
+                                     CFDictionaryRef auxiliaryInfo) {
+    if(context) LC32_CG_CALL(
+        LC32CoreGraphicsOpContextBeginTransparencyLayer,
+        LC32_CG_HOST(context), LC32_CG_HOST(auxiliaryInfo));
+}
+
+void CGContextEndTransparencyLayer(CGContextRef context) {
+    if(context) LC32_CG_CALL(
+        LC32CoreGraphicsOpContextEndTransparencyLayer,
+        LC32_CG_HOST(context));
+}
+
+void CGContextSetFont(CGContextRef context, CGFontRef font) {
+    if(context && font) LC32_CG_CALL(LC32CoreGraphicsOpContextSetFont,
+        LC32_CG_HOST(context), LC32_CG_HOST(font));
+}
+
+void CGContextSetFontSize(CGContextRef context, CGFloat size) {
+    if(context) LC32_CG_CALL(LC32CoreGraphicsOpContextSetFontSize,
+        LC32_CG_HOST(context), LC32_CG_F32(size));
+}
+
+void CGContextSetTextDrawingMode(CGContextRef context,
+                                 CGTextDrawingMode mode) {
+    if(context) LC32_CG_CALL(LC32CoreGraphicsOpContextSetTextDrawingMode,
+        LC32_CG_HOST(context), LC32_CG_U32(mode));
+}
+
+void CGContextShowGlyphsAtPoint(CGContextRef context, CGFloat x,
+        CGFloat y, const CGGlyph *glyphs, size_t count) {
+    if(context && glyphs && count) LC32_CG_CALL(
+        LC32CoreGraphicsOpContextShowGlyphsAtPoint,
+        LC32_CG_HOST(context), LC32_CG_F32(x), LC32_CG_F32(y),
+        LC32_CG_U32((uintptr_t)glyphs), LC32_CG_U32(count));
 }
 
 void CGContextClosePath(CGContextRef context) {
@@ -775,6 +900,10 @@ CGRect CGPathGetBoundingBox(CGPathRef path) {
     return LC32_CG_CALL(LC32CoreGraphicsOpPathGetBoundingBox,
         LC32_CG_HOST(path), LC32_CG_U32((uintptr_t)&result))
         ? result : CGRectNull;
+}
+
+CGPathRef CGPathRetain(CGPathRef path) {
+    return path ? (CGPathRef)CFRetain(path) : NULL;
 }
 
 void CGPathRelease(CGPathRef cg_nullable path) {

@@ -958,11 +958,10 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
         return 1;
     }
 
-    const char *configuredGuestHomeValue = getenv("LC32_GUEST_HOME");
     const std::string configuredGuestHome =
-        configuredGuestHomeValue != nullptr &&
-            configuredGuestHomeValue[0] == '/' ?
-                configuredGuestHomeValue : "";
+        LC32GuestBootstrap::SelectConfiguredHomeDirectory(
+            getenv("LC32_GUEST_HOME"), getenv("LC_HOME_PATH"),
+            getenv("HOME"));
 
     /*
      * Snapshot explicit guest variables before any setenv call can replace

@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-const CFRunLoopMode kCFRunLoopCommonModes = CFSTR("kCFRunLoopCommonModes");
-
 CFRange __CFRangeMake(CFIndex location, CFIndex length) {
     return (CFRange){.location = location, .length = length};
 }

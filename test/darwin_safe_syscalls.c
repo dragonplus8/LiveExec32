@@ -52,6 +52,15 @@ extern int fdatasync(int fd);
 
 static int failures;
 
+struct LC32SandboxContainerPathArguments {
+    uint64_t pid;
+    uint64_t buffer;
+    uint64_t capacity;
+};
+
+_Static_assert(sizeof(struct LC32SandboxContainerPathArguments) == 24,
+    "unexpected ARM32 sandbox container path argument layout");
+
 struct LC32FlockTimeout {
     struct flock lock;
     struct timespec timeout;
@@ -70,6 +79,44 @@ _Static_assert(sizeof(struct LC32FlockTimeout) == 32,
         failures++;                                                     \
     }                                                                   \
 } while (0)
+
+static void test_sandbox_container_path(void) {
+    char path[PATH_MAX];
+    memset(path, 0xa5, sizeof(path));
+    struct LC32SandboxContainerPathArguments arguments = {
+        .pid = (uint64_t)getpid(),
+        .buffer = (uintptr_t)path,
+        .capacity = sizeof(path),
+    };
+    const int result = syscall(
+        SYS___mac_syscall, "Sandbox", 4, &arguments);
+    CHECK(result == 0 && path[0] == '/' &&
+              memchr(path, '\0', sizeof(path)) != NULL,
+          "sandbox-container-path-current-pid-copyout");
+    const char *home = getenv("HOME");
+    CHECK(result == 0 && home != NULL &&
+              memchr(path, '\0', sizeof(path)) != NULL &&
+              strcmp(path, home) == 0,
+          "sandbox-container-path-matches-guest-home");
+
+    memset(path, 0xa5, sizeof(path));
+    arguments.capacity = 1;
+    errno = 0;
+    CHECK(syscall(SYS___mac_syscall, "Sandbox", 4, &arguments) == -1 &&
+              errno == ENAMETOOLONG && (unsigned char)path[0] == 0xa5,
+          "sandbox-container-path-small-buffer-unchanged");
+
+    arguments.buffer = 0;
+    arguments.capacity = sizeof(path);
+    errno = 0;
+    CHECK(syscall(SYS___mac_syscall, "Sandbox", 4, &arguments) == -1 &&
+              errno == EFAULT,
+          "sandbox-container-path-null-output");
+    errno = 0;
+    CHECK(syscall(SYS___mac_syscall, "Sandbox", 4, NULL) == -1 &&
+              errno == EFAULT,
+          "sandbox-container-path-null-arguments");
+}
 
 static int poll_null_descriptors(void) {
     int (*volatile function)(struct pollfd *, nfds_t, int) = poll;
@@ -606,6 +653,7 @@ static void test_file_syscalls(const char *temporaryRootOverride) {
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    test_sandbox_container_path();
     test_scalar_syscalls();
     test_pipe_poll_readv();
     test_file_syscalls(argc > 1 ? argv[1] : NULL);

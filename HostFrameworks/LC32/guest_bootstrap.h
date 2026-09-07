@@ -12,6 +12,14 @@ namespace LC32GuestBootstrap {
 inline constexpr char EnvironmentPrefix[] = "LC32_GUEST_ENV_";
 inline constexpr std::size_t InitialStackGap = 0x1000;
 
+// LiveContainer's HOME is the selected guest data container, while its
+// Foundation home can still identify the outer container. Return an owning
+// snapshot before launcher setenv calls can invalidate environment pointers.
+std::string SelectConfiguredHomeDirectory(
+    const char *explicitGuestHome,
+    const char *liveContainerHome,
+    const char *processHome);
+
 struct EnvironmentSelection {
     std::map<std::string, std::string> values;
     std::vector<std::string> rejectedSourceNames;

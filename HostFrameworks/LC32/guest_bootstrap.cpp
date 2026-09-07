@@ -30,6 +30,19 @@ bool AddSize(std::size_t left, std::size_t right, std::size_t *result) {
 
 } // anonymous namespace
 
+std::string SelectConfiguredHomeDirectory(
+        const char *explicitGuestHome,
+        const char *liveContainerHome,
+        const char *processHome) {
+    if(explicitGuestHome && explicitGuestHome[0] == '/') {
+        return explicitGuestHome;
+    }
+    if(liveContainerHome && processHome && processHome[0] == '/') {
+        return processHome;
+    }
+    return {};
+}
+
 EnvironmentSelection CollectEnvironment(char *const environment[]) {
     EnvironmentSelection selection;
     if(!environment) return selection;

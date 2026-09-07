@@ -41,10 +41,32 @@ const CFStringRef kCFBundleDevelopmentRegionKey =
 const CFStringRef kCFBundleNameKey = CFSTR("CFBundleName");
 const CFStringRef kCFBundleLocalizationsKey = CFSTR("CFBundleLocalizations");
 
+/*
+ * Run-loop common modes is a native pointer sentinel, not an ordinary mode
+ * name. A freshly bridged string with equal contents can strand sources in
+ * a mode which the main run loop never runs. Give the CF/Foundation aliases
+ * one guest identity each and bind them to their native constants below.
+ */
+static LC32ConstantStringProxy LC32CFRunLoopDefaultMode = {
+    __CFConstantStringClassReference, 0x7c8,
+    "kCFRunLoopDefaultMode", sizeof("kCFRunLoopDefaultMode") - 1,
+};
+static LC32ConstantStringProxy LC32CFRunLoopCommonModes = {
+    __CFConstantStringClassReference, 0x7c8,
+    "kCFRunLoopCommonModes", sizeof("kCFRunLoopCommonModes") - 1,
+};
+
 const CFRunLoopMode kCFRunLoopDefaultMode =
-    CFSTR("kCFRunLoopDefaultMode");
+    (CFRunLoopMode)(const void *)&LC32CFRunLoopDefaultMode;
+const CFRunLoopMode kCFRunLoopCommonModes =
+    (CFRunLoopMode)(const void *)&LC32CFRunLoopCommonModes;
+NSString * const NSDefaultRunLoopMode =
+    (NSString *)(void *)&LC32CFRunLoopDefaultMode;
+NSString * const NSRunLoopCommonModes =
+    (NSString *)(void *)&LC32CFRunLoopCommonModes;
 
 /* These CFStream constants are exported by CoreFoundation on iOS 10. */
+const int kCFStreamErrorDomainSSL = 3;
 const int kCFStreamErrorDomainSOCKS = 5;
 const CFStringRef kCFStreamPropertyShouldCloseNativeSocket =
     CFSTR("kCFStreamPropertyShouldCloseNativeSocket");
@@ -142,7 +164,6 @@ NSString * const NSLocaleIdentifier = @"kCFLocaleIdentifierKey";
 NSString * const NSLocaleLanguageCode = @"kCFLocaleLanguageCodeKey";
 NSNotificationName const NSCurrentLocaleDidChangeNotification =
     @"kCFLocaleCurrentLocaleDidChangeNotification";
-NSString * const NSRunLoopCommonModes = @"kCFRunLoopCommonModes";
 const NSStreamPropertyKey NSStreamDataWrittenToMemoryStreamKey =
     @"kCFStreamPropertyDataWritten";
 const NSStreamPropertyKey NSStreamFileCurrentOffsetKey =
@@ -287,6 +308,10 @@ static id LC32CreateCoreFoundationConstantProxy(const char *className,
 
 __attribute__((constructor))
 static void LC32InitializeCoreFoundationObjectConstants(void) {
+    LC32BindHostObjectConstant((id)kCFRunLoopDefaultMode,
+        "kCFRunLoopDefaultMode");
+    LC32BindHostObjectConstant((id)kCFRunLoopCommonModes,
+        "kCFRunLoopCommonModes");
     LC32CFBooleanTrue = (CFBooleanRef)
         LC32CreateCoreFoundationConstantProxy(
             "LC32CFImmortalNumber", "kCFBooleanTrue");

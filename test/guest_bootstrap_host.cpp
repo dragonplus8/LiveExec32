@@ -40,6 +40,32 @@ bool Contains(const std::vector<std::string> &values,
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
+void TestConfiguredHomeDirectory() {
+    using LC32GuestBootstrap::SelectConfiguredHomeDirectory;
+    CHECK(SelectConfiguredHomeDirectory(
+        "/explicit", "/outer", "/selected") == "/explicit");
+    CHECK(SelectConfiguredHomeDirectory(
+        "/explicit", nullptr, "/native") == "/explicit");
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", "/selected") == "/selected");
+    CHECK(SelectConfiguredHomeDirectory(
+        "", "/outer", "/selected") == "/selected");
+    CHECK(SelectConfiguredHomeDirectory(
+        "relative", "/outer", "/selected") == "/selected");
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, nullptr, "/native").empty());
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", "relative").empty());
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", nullptr).empty());
+
+    char selectedHome[] = "/selected";
+    const std::string snapshot = SelectConfiguredHomeDirectory(
+        nullptr, "/outer", selectedHome);
+    selectedHome[1] = 'X';
+    CHECK(snapshot == "/selected");
+}
+
 void TestEnvironmentSelection() {
     char ignored[] = "PATH=/usr/bin";
     char firstDuplicate[] = "LC32_GUEST_ENV_FEATURE=first";
@@ -352,6 +378,7 @@ void TestStackExhaustion() {
 } // anonymous namespace
 
 int main() {
+    TestConfiguredHomeDirectory();
     TestEnvironmentSelection();
     TestEnvironmentFinalization();
     TestDyldPrintOptIn();

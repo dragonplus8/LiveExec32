@@ -1251,6 +1251,70 @@ guest_mach_msg_trap(u32 guest_msg,
                     : KERN_INVALID_ARGUMENT;
             break;
         }
+        case 3809: { // vm_read_overwrite
+            /*
+             * Like vm_copy, this request contains ARM32 virtual addresses,
+             * not host pointers. Keep both the request and the returned size
+             * at the guest's 32-bit width, and copy within the guest map.
+             */
+            struct __attribute__((packed, aligned(4))) VmReadOverwriteRequest32 {
+                mach_msg_header_t Head;
+                NDR_record_t NDR;
+                u32 address;
+                u32 size;
+                u32 data;
+            };
+            struct __attribute__((packed, aligned(4))) VmReadOverwriteReply32 {
+                mach_msg_header_t Head;
+                NDR_record_t NDR;
+                kern_return_t RetCode;
+                u32 outsize;
+            };
+            static_assert(sizeof(VmReadOverwriteRequest32) == 44,
+                "unexpected ARM32 vm_read_overwrite request layout");
+            static_assert(sizeof(VmReadOverwriteReply32) == 40,
+                "unexpected ARM32 vm_read_overwrite reply layout");
+
+            /* MIG leaves msgh_size unset on send; the trap's send_size is
+             * authoritative, and the kernel normally fills the header. */
+            if (send_size != sizeof(VmReadOverwriteRequest32) ||
+                    (request_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
+                if (rcv_size < sizeof(mig_reply_error_t)) {
+                    host_header->msgh_size = sizeof(mig_reply_error_t);
+                    result = MACH_RCV_TOO_LARGE;
+                } else {
+                    auto *error = reinterpret_cast<mig_reply_error_t *>(
+                        host_header);
+                    host_header->msgh_size = sizeof(*error);
+                    error->NDR = NDR_record;
+                    error->RetCode = MIG_BAD_ARGUMENTS;
+                }
+                break;
+            }
+            if (rcv_size < sizeof(VmReadOverwriteReply32)) {
+                host_header->msgh_size = sizeof(VmReadOverwriteReply32);
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+
+            const auto request = *reinterpret_cast<
+                const VmReadOverwriteRequest32 *>(host_header);
+            auto *reply = reinterpret_cast<VmReadOverwriteReply32 *>(
+                host_header);
+            reply->NDR = NDR_record;
+            reply->RetCode =
+                request.Head.msgh_request_port == mach_task_self()
+                    ? CopyGuestVmMemory(request.address,
+                        request.data, request.size)
+                    : KERN_INVALID_ARGUMENT;
+            if (reply->RetCode == KERN_SUCCESS) {
+                reply->outsize = request.size;
+                host_header->msgh_size = sizeof(*reply);
+            } else {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+            }
+            break;
+        }
         case 3213: {
             MACH_MSG_UNION(mach_port_request_notification, Mess);
             /*
@@ -2423,11 +2487,54 @@ int guest_kevent_qos(int kq, u32 changelist, int nchanges,
 }
 
 int guest_sandbox_ms(u32 guest_policyname, int call, u32 guest_arg) {
-    // TODO: ???
-    char host_policyname[0x20];
-    Dynarmic_mem_1read(guest_policyname, sizeof(host_policyname), host_policyname);
+    char host_policyname[PATH_MAX];
+    const int policyError =
+        LC32CopyGuestCString(guest_policyname, host_policyname);
+    if(policyError) return return_with_carry_direct(policyError, true);
     printf("sandbox(%s, %d)\n", host_policyname, call);
-    return 0;
+    if(strcmp(host_policyname, "Sandbox") == 0 && call == 4) {
+        /*
+         * iOS 10 sandbox_container_path_for_pid uses three 64-bit argument
+         * slots even on ARM32. libsystem_containermanager immediately uses
+         * this output to replace HOME/CFFIXED_USER_HOME and derive TMPDIR.
+         * Reporting success without filling it copied uninitialized guest
+         * stack bytes into those environment variables.
+         */
+        struct GuestSandboxContainerPathArguments {
+            u64 pid;
+            u64 buffer;
+            u64 capacity;
+        } arguments = {};
+        static_assert(sizeof(arguments) == 24);
+        if(!read_guest_memory_with_permissions(
+                guest_arg, &arguments, sizeof(arguments), PROT_READ)) {
+            return return_with_carry_direct(EFAULT, true);
+        }
+        if(arguments.pid != 0 &&
+                arguments.pid != static_cast<u64>(getpid())) {
+            return return_with_carry_direct(ENOTSUP, true);
+        }
+        if(arguments.buffer == 0 || arguments.buffer > UINT32_MAX) {
+            return return_with_carry_direct(EFAULT, true);
+        }
+        const char *home = getenv("LC32_GUEST_HOME");
+        const std::string guestHome = home ? home : "";
+        if(guestHome.empty() || guestHome[0] != '/') {
+            return return_with_carry_direct(ENOTSUP, true);
+        }
+        const size_t required = guestHome.size() + 1;
+        if(arguments.capacity < required) {
+            return return_with_carry_direct(ENAMETOOLONG, true);
+        }
+        if(!write_guest_memory_with_permissions(
+                arguments.buffer, guestHome.c_str(), required,
+                PROT_WRITE)) {
+            return return_with_carry_direct(EFAULT, true);
+        }
+        return return_with_carry_direct(0, false);
+    }
+    // TODO: translate the remaining sandbox operations and their outputs.
+    return return_with_carry_direct(0, false);
 }
 
 int guest_getentropy(u32 guest_buffer, u32 length) {
