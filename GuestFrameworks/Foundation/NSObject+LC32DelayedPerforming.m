@@ -128,6 +128,29 @@ static void LC32CancelDelayedPerforms(
     if(!LC32TakeDelayedPerform(self)) return;
 
     /*
+     * The dispatch below stays entirely inside the guest and never re-enters
+     * LC32InvokeGuestSelectorRaw, so the host's last-guest-selector crash
+     * diagnostic is left stuck naming this trampoline instead of whatever
+     * _target/_selector turns out to be. Recording it here means a crash
+     * inside the real destination shows up as something useful instead of
+     * just "-[LC32DelayedPerformRequest lc32_fireDelayedPerform:]".
+     */
+    pthread_once(&LC32RecordLastSelectorHostOnce,
+        LC32ResolveRecordLastSelectorHostFunction);
+    if(LC32RecordLastSelectorHostFunction && _target && _selector) {
+        LC32FoundationRecordLastSelectorCall call = {
+            .version = LC32FoundationRecordLastSelectorABIVersion,
+            .slotCount = LC32FoundationRecordLastSelectorSlotCount,
+        };
+        call.slots[LC32FoundationRecordLastSelectorTargetSlot] =
+            ((id)_target).host_self;
+        call.slots[LC32FoundationRecordLastSelectorSelectorSlot] =
+            LC32GetHostSelector(_selector);
+        LC32InvokeHostCRet32(LC32RecordLastSelectorHostFunction,
+            (uint32_t)(uintptr_t)&call);
+    }
+
+    /*
      * Passing the optional object is ABI-safe for zero-argument selectors and
      * matches NSObject's delayed-performing contract for one-argument ones.
      * In particular, @selector(release) must execute in the guest instead of
