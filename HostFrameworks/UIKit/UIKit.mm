@@ -685,6 +685,17 @@ UIInterfaceOrientationMask
     return LC32GuestInterfacePolicy().declaredOrientations;
 }
 
+/* Pure host stand-in for a guest class's own -shouldAutorotate that is
+ * known to crash reading unpopulated guest state -- see the
+ * SplashScreenController installation site in LC32UIKitPrepareGuestClass.
+ * Real UIViewController's own default implementation is unconditionally
+ * YES; this just mirrors that and leaves -supportedInterfaceOrientations
+ * (already made safe above) as the actual arbiter of which orientations
+ * are allowed. */
+BOOL LC32SafeShouldAutorotate(UIViewController *, SEL) {
+    return YES;
+}
+
 void LC32ScaleLegacyIPadWindow(UIWindow *window);
 CGRect LC32WindowSceneBounds(UIWindow *window);
 bool LC32UsesClassicFullScreenViewport(UIWindow *window);
@@ -2928,6 +2939,23 @@ extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
             class_replaceMethod(cls,
                 @selector(supportedInterfaceOrientations),
                 (IMP)&LC32SafeDeclaredInterfaceOrientations,
+                method_getTypeEncoding(declaration));
+        }
+    }
+
+    /* SplashScreenController crashes reading the exact same unpopulated
+     * guest address as the BFAppController orientation crash, just via
+     * -shouldAutorotate instead -- it runs even earlier in boot, before
+     * BFAppController's own window setup. Same treatment: only this one
+     * class name is touched. If a third class hits this same address,
+     * that stops being a coincidence and is worth root-causing directly
+     * instead of continuing to patch call sites one at a time. */
+    if(strcmp(class_getName(cls), "SplashScreenController") == 0) {
+        Method declaration = class_getInstanceMethod(
+            UIViewController.class, @selector(shouldAutorotate));
+        if(declaration) {
+            class_replaceMethod(cls, @selector(shouldAutorotate),
+                (IMP)&LC32SafeShouldAutorotate,
                 method_getTypeEncoding(declaration));
         }
     }
