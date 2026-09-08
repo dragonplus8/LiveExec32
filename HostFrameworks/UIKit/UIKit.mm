@@ -655,6 +655,22 @@ BOOL LC32LegacyPrefersStatusBarHidden(UIViewController *, SEL) {
     return LC32GuestInterfacePolicy().statusBarHidden;
 }
 
+/* Pure host stand-in for a guest class's own -supportedInterfaceOrientations
+ * that is known to crash. Never calls into the guest, unlike
+ * LC32LegacySupportedInterfaceOrientations above, which exists to translate
+ * a legacy API and does still ask the guest via the older selector. This
+ * one exists because the guest's *own* implementation of the modern
+ * selector is itself unsafe to call at all -- see the
+ * UnityDefaultViewController installation site in
+ * LC32UIKitPrepareGuestClass for why. */
+UIInterfaceOrientationMask LC32SafeDeclaredInterfaceOrientations(
+        UIViewController *controller, SEL) {
+    NSNumber *cached = objc_getAssociatedObject(
+        controller, LC32LegacyOrientationMaskKey);
+    return cached ? (UIInterfaceOrientationMask)cached.unsignedLongLongValue
+                  : LC32GuestInterfacePolicy().declaredOrientations;
+}
+
 void LC32ScaleLegacyIPadWindow(UIWindow *window);
 CGRect LC32WindowSceneBounds(UIWindow *window);
 bool LC32UsesClassicFullScreenViewport(UIWindow *window);
