@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "LC32DebugLog.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -490,7 +491,7 @@ u32 Dynarmic_map_file(bool isDyld, u32 target, const char *path) {
      */
     if(header->filetype == MH_EXECUTE && !(header->flags & MH_PIE)) {
         target = 0;
-        printf("LC32: mapping non-PIE executable at preferred addresses\n");
+        LC32_DEBUG_PRINTF("LC32: mapping non-PIE executable at preferred addresses\n");
     }
     
     uintptr_t cur = (uintptr_t)header + sizeof(mach_header);
@@ -534,7 +535,7 @@ u32 Dynarmic_map_file(bool isDyld, u32 target, const char *path) {
             }
             if(segment.vmsize > segment.filesize) {
                 // round up the page
-                printf("vmsize 0x%x != filesize 0x%x\n",
+                LC32_DEBUG_PRINTF("vmsize 0x%x != filesize 0x%x\n",
                     segment.vmsize, fileMappingSize);
                 //abort();
             }
@@ -562,7 +563,7 @@ u32 Dynarmic_map_file(bool isDyld, u32 target, const char *path) {
                 headerSegmentGuestAddress = guestSegmentAddress;
                 headerSegmentFileSize = segment.filesize;
             }
-            printf("Mapping 0x%lx-0x%lx to 0x%x\n",
+            LC32_DEBUG_PRINTF("Mapping 0x%lx-0x%lx to 0x%x\n",
                 map + segment.fileoff,
                 map + segment.fileoff + segment.filesize,
                 guestSegmentAddress);
@@ -844,7 +845,7 @@ u32 Dynarmic_map_file(bool isDyld, u32 target, const char *path) {
                 encryption.cryptid, strerror(decryptionError));
             LC32MapFileFailure(path, message);
         }
-        printf("LC32: decrypted main executable range "
+        LC32_DEBUG_PRINTF("LC32: decrypted main executable range "
             "0x%08x-0x%08llx (cryptid %u)\n",
             guestEncryptedAddress,
             static_cast<unsigned long long>(
@@ -1046,10 +1047,10 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
     
     // map dyld
     const char *dyldPath = getenv("DYLD_PATH");
-    printf("Loading dyld at DYLD_PATH %s\n", dyldPath);
+    LC32_DEBUG_PRINTF("Loading dyld at DYLD_PATH %s\n", dyldPath);
     Dynarmic_map_file(true, 0x10000000, dyldPath);
     InstallGuestTracepointsFromEnvironment();
-    printf("entry point: 0x%x\n", threadHandle.jit->Regs()[15]);
+    LC32_DEBUG_PRINTF("entry point: 0x%x\n", threadHandle.jit->Regs()[15]);
     
     // commpage 0xffff4000+0x1000
     u32 commpage = Dynarmic_mmap(0xffff4000, 0x1000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
@@ -1158,7 +1159,7 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
     }
     const u32 dyldStackPtr = initialStack.stackPointer;
     
-    printf("LC32: stack ptr now 0x%x\n", dyldStackPtr);
+    LC32_DEBUG_PRINTF("LC32: stack ptr now 0x%x\n", dyldStackPtr);
     
     // Go!
     Dynarmic_reg_1write(13, dyldStackPtr);

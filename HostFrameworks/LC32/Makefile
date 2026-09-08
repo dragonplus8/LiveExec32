@@ -6,6 +6,9 @@ STRIP = 0
 # Theos otherwise pairs STRIP=0 with -O0. Keep symbols for device traces while
 # compiling the emulator and bridge hot paths as release code.
 OPTFLAG = -O2
+# Verbose bridge, loader, memory, and syscall traces are opt-in, independent
+# of optimization or debug symbols. Errors remain enabled in every build.
+LC32_DEBUG_LOGS ?= 0
 # The root app signs the embedded copy after its optional Catalyst rewrite.
 TARGET_CODESIGN =
 
@@ -65,7 +68,7 @@ LiveExec32Shared_FILES = \
 	../OpenAL/OpenAL.mm ../OpenGLES/OpenGLES.mm ../UIKit/UIKit.mm
 LiveExec32Shared_CFLAGS = \
 	-I. -I$(DYNARMIC_ROOT)/src -I../../include -DDYNARMIC_MASTER \
-	-I../../External/mini-gdbstub/include
+	-I../../External/mini-gdbstub/include -DLC32_DEBUG_LOGS=$(LC32_DEBUG_LOGS)
 LiveExec32Shared_CCFLAGS = -std=c++17
 crash_exception.mm_CFLAGS = -fobjc-arc
 LiveExec32Shared_OBJ_FILES = $(DYNARMIC_STATIC_LIBS)

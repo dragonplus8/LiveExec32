@@ -347,7 +347,7 @@ int guest_shm_open(u32 guest_name, int oflag, int mode) {
     if(copy_error != 0) {
         return return_with_carry_direct(copy_error, true);
     }
-    printf("LC32: shm_open %s\n", host_name);
+    LC32_DEBUG_PRINTF("LC32: shm_open %s\n", host_name);
     return syscallRetCarry(SYS_shm_open, host_name, oflag, mode);
 }
 
@@ -774,7 +774,7 @@ guest_mach_msg_trap(u32 guest_msg,
         return MACH_SEND_INVALID_DEST;
     }
 
-    printf("LC32: mach_msg_trap id %d\n", host_header->msgh_id);
+    LC32_DEBUG_PRINTF("LC32: mach_msg_trap id %d\n", host_header->msgh_id);
 
     // pre-process reply header
     const mach_msg_bits_t request_bits = host_header->msgh_bits;
@@ -1158,7 +1158,7 @@ guest_mach_msg_trap(u32 guest_msg,
                 // can resolve this original guest path through its matching
                 // DeviceSupport Symbols tree.
                 ++guestMappingGeneration;
-                printf("LC32: added image %s (0x%08x-0x%08x)\n",
+                LC32_DEBUG_PRINTF("LC32: added image %s (0x%08x-0x%08x)\n",
                        guestMappings[mappingIndex].name,
                        guestMappings[mappingIndex].start,
                        guestMappings[mappingIndex].end);
@@ -2563,7 +2563,7 @@ int guest_sandbox_ms(u32 guest_policyname, int call, u32 guest_arg) {
     const int policyError =
         LC32CopyGuestCString(guest_policyname, host_policyname);
     if(policyError) return return_with_carry_direct(policyError, true);
-    printf("sandbox(%s, %d)\n", host_policyname, call);
+    LC32_DEBUG_PRINTF("sandbox(%s, %d)\n", host_policyname, call);
     if(strcmp(host_policyname, "Sandbox") == 0 && call == 4) {
         /*
          * iOS 10 sandbox_container_path_for_pid uses three 64-bit argument
@@ -4042,9 +4042,9 @@ int guest_sigaction(int sig, u32 guest_act, u32 guest_oact) {
         Dynarmic_mem_1write(guest_oact, sizeof(sigaction_32), (char *)&host_actions[sig]);
     }
     if (guest_act) {
-        printf("LC32: sigaction: 0x%08x -> ", host_actions[sig]._sa_handler);
+        LC32_DEBUG_PRINTF("LC32: sigaction: 0x%08x -> ", host_actions[sig]._sa_handler);
         Dynarmic_mem_1read(guest_act, sizeof(sigaction_32), (char *)&host_actions[sig]);
-        printf("LC32: 0x%08x\n", host_actions[sig]._sa_handler);
+        LC32_DEBUG_PRINTF("LC32: 0x%08x\n", host_actions[sig]._sa_handler);
     }
     return 0;
 }

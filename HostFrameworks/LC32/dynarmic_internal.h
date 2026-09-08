@@ -71,6 +71,7 @@
 #include "dynarmic.h"
 #include "debugger_server.h"
 #include "32bit.h"
+#include "LC32DebugLog.h"
 
 #define IGNORE_BAD_MEM_ACCESS 0
 #define TRACE_RW 0

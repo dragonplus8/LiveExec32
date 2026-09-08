@@ -30,6 +30,11 @@ gmake
   `gmake LC32_BUILD_CATALYST=1`. This opt-in mode rewrites and re-signs only
   the assembled app and its embedded frameworks for Catalyst; a subsequent
   plain `gmake` restores normal iOS artifacts without requiring `clean`.
+  Verbose host bridge, loader, memory, syscall, and thread logs are compiled
+  out by default. Build with `gmake LC32_DEBUG_LOGS=1` to enable them; rebuild
+  with `gmake LC32_DEBUG_LOGS=0` (or plain `gmake`) to disable them again.
+  Errors and actionable warnings remain enabled in both modes, and existing
+  specialized runtime trace controls are unchanged.
 - Generate the guest Objective-C shims, then build the guest frameworks:
 ```bash
 gmake -C GuestMakefile generate-shims

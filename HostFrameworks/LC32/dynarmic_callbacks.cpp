@@ -2497,7 +2497,7 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
     }
 
     bool handleMachineDependentSyscall(int NR) {
-        printf("handleMachineDependentSyscall(%d)\n", NR);
+        LC32_DEBUG_PRINTF("handleMachineDependentSyscall(%d)\n", NR);
         switch (NR) {
             case 0:
                 InvalidateAllGuestJits(
@@ -2508,7 +2508,7 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
                 //backend.reg_write(ArmConst.UC_ARM_REG_R0, sys_dcache_flush(emulator));
                 return true;
             case 2:
-                printf("TSB set to 0x%08x\n", cpu->Regs()[0]);
+                LC32_DEBUG_PRINTF("TSB set to 0x%08x\n", cpu->Regs()[0]);
                 cp15.get()->uro = cpu->Regs()[0];
                 cpu->Regs()[0] = 0;
                 return true;

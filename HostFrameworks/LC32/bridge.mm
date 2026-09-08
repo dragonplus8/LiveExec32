@@ -1,6 +1,7 @@
 #import "bridge.h"
 #include "crash_exception.h"
 #include "LC32ObjCBridgeABI.h"
+#include "LC32DebugLog.h"
 
 #import <dispatch/dispatch.h>
 #import <mach/mach_init.h>
@@ -2324,7 +2325,11 @@ u64 LC32Dlsym(u32 guest_name, bool isFunction) {
     if(!r && !isFunction) {
         r = (u64)LC32CoreDataMergePolicyForSymbol(host_name.hostPtr);
     }
-    printf("LC32: dlsym %s = 0x%llx\n", host_name.hostPtr, r);
+    if(!r) {
+        printf("LC32: dlsym %s = 0x%llx\n", host_name.hostPtr, r);
+    } else {
+        LC32_DEBUG_PRINTF("LC32: dlsym %s = 0x%llx\n", host_name.hostPtr, r);
+    }
     return r;
 }
 
@@ -6414,7 +6419,7 @@ BOOL host_hook_getClass(const char *name, Class *outClass) {
         return false;
     }
 
-    printf("host_hook_getClass: %s\n", name);
+    LC32_DEBUG_PRINTF("host_hook_getClass: %s\n", name);
     *outClass = guest_objc_getClass_retHostClass(name);
     return *outClass != nil;
 }
@@ -6519,7 +6524,7 @@ BOOL host_hook_getClass(const char *name, Class *outClass) {
         return 0;
     }
     if(matchedHostClass != hostClass) {
-        printf("LC32: mapping host class %s through guest superclass %s\n",
+        LC32_DEBUG_PRINTF("LC32: mapping host class %s through guest superclass %s\n",
             className, class_getName(matchedHostClass));
     }
     if(object_isClass(self)) return self.guest_self = ptr;
@@ -7108,7 +7113,7 @@ static const char *LC32ExpectedHostMethodTypes(Class cls, SEL selector) {
 
 // FIXME: currently using class_get*Method which may return superclass's method, but I guess this shouldn't affect anything
 + (BOOL)resolveClassMethod:(SEL)sel {
-    printf("resolveClassMethod %s\n", sel_getName(sel));
+    LC32_DEBUG_PRINTF("resolveClassMethod %s\n", sel_getName(sel));
     /*
      * Native frameworks may ask about an optional selector from one of their
      * own queues.  Such a thread has no ARM32 JIT or guest stack.  All methods
@@ -7128,7 +7133,7 @@ static const char *LC32ExpectedHostMethodTypes(Class cls, SEL selector) {
 }
 
 + (BOOL)resolveInstanceMethod:(SEL)sel {
-    printf("resolveInstanceMethod %s\n", sel_getName(sel));
+    LC32_DEBUG_PRINTF("resolveInstanceMethod %s\n", sel_getName(sel));
     if(!Dynarmic_guest_thread_is_registered()) {
         return [super resolveInstanceMethod:sel];
     }

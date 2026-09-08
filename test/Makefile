@@ -1,5 +1,5 @@
 LC32_HOST_TEST_GOALS := check-guest-bootstrap check-memory-hash \
-  check-coremedia-time-values-host
+  check-coremedia-time-values-host check-debug-logging
 LC32_HOST_ONLY_BUILD := $(if $(strip $(MAKECMDGOALS)),\
   $(if $(strip $(filter-out $(LC32_HOST_TEST_GOALS),$(MAKECMDGOALS))),,1),)
 
@@ -12,9 +12,11 @@ GUEST_BOOTSTRAP_HOST_TEST := $(HOST_TEST_OUTPUT_DIR)/guest-bootstrap-host
 MEMORY_HASH_HOST_TEST := $(HOST_TEST_OUTPUT_DIR)/memory-hash-host
 COREMEDIA_TIME_VALUES_HOST_TEST := \
   $(HOST_TEST_OUTPUT_DIR)/coremedia-time-values-host
+DEBUG_LOGGING_HOST_TESTS := $(addprefix $(HOST_TEST_OUTPUT_DIR)/debug-logging-,\
+  default disabled enabled)
 
 .PHONY: check-guest-bootstrap check-memory-hash \
-  check-coremedia-time-values-host
+  check-coremedia-time-values-host check-debug-logging
 check-guest-bootstrap: $(GUEST_BOOTSTRAP_HOST_TEST)
 	"$(GUEST_BOOTSTRAP_HOST_TEST)"
 
@@ -23,6 +25,23 @@ check-memory-hash: $(MEMORY_HASH_HOST_TEST)
 
 check-coremedia-time-values-host: $(COREMEDIA_TIME_VALUES_HOST_TEST)
 	"$(COREMEDIA_TIME_VALUES_HOST_TEST)"
+
+check-debug-logging: $(DEBUG_LOGGING_HOST_TESTS)
+	"$(HOST_TEST_OUTPUT_DIR)/debug-logging-default"
+	"$(HOST_TEST_OUTPUT_DIR)/debug-logging-disabled"
+	"$(HOST_TEST_OUTPUT_DIR)/debug-logging-enabled"
+
+$(HOST_TEST_OUTPUT_DIR)/debug-logging-default: DEBUG_LOGGING_TEST_FLAGS := \
+  -ULC32_DEBUG_LOGS -DLC32_TEST_EXPECT_ENABLED=0
+$(HOST_TEST_OUTPUT_DIR)/debug-logging-disabled: DEBUG_LOGGING_TEST_FLAGS := \
+  -ULC32_DEBUG_LOGS -DLC32_DEBUG_LOGS=0 -DLC32_TEST_EXPECT_ENABLED=0
+$(HOST_TEST_OUTPUT_DIR)/debug-logging-enabled: DEBUG_LOGGING_TEST_FLAGS := \
+  -ULC32_DEBUG_LOGS -DLC32_DEBUG_LOGS=1 -DLC32_TEST_EXPECT_ENABLED=1
+
+$(DEBUG_LOGGING_HOST_TESTS): debug_logging.c ../include/LC32DebugLog.h
+	@mkdir -p "$(HOST_TEST_OUTPUT_DIR)"
+	$(HOST_CC) $(HOST_CFLAGS) $(DEBUG_LOGGING_TEST_FLAGS) \
+		-I"$(abspath ../include)" debug_logging.c -o "$@"
 
 $(GUEST_BOOTSTRAP_HOST_TEST): guest_bootstrap_host.cpp \
   ../HostFrameworks/LC32/guest_bootstrap.cpp \

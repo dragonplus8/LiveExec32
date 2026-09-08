@@ -710,7 +710,7 @@ static u64 Dynarmic_mem_reserve(
         kh_value(memory, k) = page;
     }
 
-    printf("Dynarmic_mem_reserve: 0x%llx-0x%llx\n", address, address + size);
+    LC32_DEBUG_PRINTF("Dynarmic_mem_reserve: 0x%llx-0x%llx\n", address, address + size);
     return address;
 }
 
@@ -898,7 +898,7 @@ u32 Dynarmic_mmap(
     u64 addr = reinterpret_cast<u64>(mappingAddress) +
         (off - aligned_off);
 
-    printf("DBG: mmaping host 0x%llx to 0x%x\n", addr, address);
+    LC32_DEBUG_PRINTF("DBG: mmaping host 0x%llx to 0x%x\n", addr, address);
 
 #ifdef LC32_GUEST_MEMORY_WATCH_ADDRESS
     if (GuestMemoryWatchOverlaps(
