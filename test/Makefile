@@ -216,6 +216,7 @@ $(eval $(call lc32_guest_test,lc32-uikit-accessibility,uikit_accessibility.m,Fou
 $(eval $(call lc32_guest_test,lc32-uikit-nib-awakening,uikit_nib_awakening.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-image-context,uikit_image_context.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-device,uikit_legacy_device.m,Foundation UIKit LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-legacy-overlay,uikit_legacy_overlay.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-string-sizing,uikit_legacy_string_sizing.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-window-root,uikit_legacy_window_root.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-view-load-reentrancy,uikit_view_load_reentrancy.m,Foundation UIKit CoreGraphics LC32))
@@ -254,6 +255,10 @@ lc32-corefoundation-write-stream_CFLAGS := -fno-objc-arc
 lc32-coretext-bridge_CFLAGS := -fno-objc-arc
 lc32-foundation-null-utf8_CFLAGS := -fno-objc-arc
 lc32-uikit-legacy-window-root_CFLAGS := -fno-objc-arc -Wall -Wextra -Werror
+# Override Theos' clang target, which otherwise takes precedence over a
+# standalone -miphoneos-version-min flag and advertises SDK 10.3.
+lc32-uikit-legacy-overlay_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
+lc32-uikit-legacy-overlay_LDFLAGS += -target armv7s-apple-ios7.0
 
 lc32-cxx-lifecycle_CCFLAGS := -std=c++14
 

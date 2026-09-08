@@ -88,6 +88,8 @@ const void *LC32LegacyDirectWindowSublayerTransformKey =
     &LC32LegacyDirectWindowSublayerTransformKey;
 const void *LC32LegacyDirectWindowAppliedSublayerTransformKey =
     &LC32LegacyDirectWindowAppliedSublayerTransformKey;
+const void *LC32LegacyOverlayLayoutPendingKey =
+    &LC32LegacyOverlayLayoutPendingKey;
 
 struct LC32GuestUIKitPolicy {
     UIInterfaceOrientationMask declaredOrientations;
@@ -1401,6 +1403,106 @@ bool LC32TransformNearlyEquals(
            fabs(left.ty - right.ty) < epsilon;
 }
 
+bool LC32LayerContainsRenderer(CALayer *layer) {
+    static Class eaglLayer = NSClassFromString(@"CAEAGLLayer");
+    static Class metalLayer = NSClassFromString(@"CAMetalLayer");
+    if((eaglLayer && [layer isKindOfClass:eaglLayer]) ||
+            (metalLayer && [layer isKindOfClass:metalLayer])) return true;
+    for(CALayer *child in layer.sublayers) {
+        if(LC32LayerContainsRenderer(child)) return true;
+    }
+    return false;
+}
+
+void LC32FitLegacyControllerOverlay(UIView *view) {
+    UIView *superview = LC32NativeViewSuperview(view);
+    if(![superview isKindOfClass:UIWindow.class]) return;
+    UIWindow *window = (UIWindow *)superview;
+    if(!view.guest_selfOrNull || !window.guest_selfOrNull ||
+            LC32LegacyContainerForWindow(window)) return;
+
+    /* Only an independently added controller root uses this old window
+     * contract. Ordinary rotated views, contained controllers, and the game
+     * root/drawable must retain their application-authored transforms. */
+    using NextResponder = UIResponder *(*)(id, SEL);
+    static NextResponder nextResponder = reinterpret_cast<NextResponder>(
+        class_getMethodImplementation(UIView.class, @selector(nextResponder)));
+    UIResponder *owner = nextResponder(view, @selector(nextResponder));
+    if(![owner isKindOfClass:UIViewController.class] ||
+            !LC32ObjectUsesGuestClass(owner)) return;
+    UIViewController *controller = (UIViewController *)owner;
+    UIView *controllerView = nil;
+    using GetController = UIViewController *(*)(id, SEL);
+    static GetController getParent = reinterpret_cast<GetController>(
+        class_getMethodImplementation(UIViewController.class,
+            @selector(parentViewController)));
+    static GetController getPresenter = reinterpret_cast<GetController>(
+        class_getMethodImplementation(UIViewController.class,
+            @selector(presentingViewController)));
+    if(controller == LC32NativeWindowRootViewController(window) ||
+            getParent(controller, @selector(parentViewController)) ||
+            getPresenter(controller, @selector(presentingViewController)) ||
+            !LC32NativeViewIfLoaded(controller, &controllerView) ||
+            controllerView != view) return;
+
+    CALayer *windowLayer = LC32NativeViewLayer(window);
+    if(!LC32TransformNearlyEquals(LC32NativeViewTransform(window),
+                CGAffineTransformIdentity) ||
+            !CATransform3DIsIdentity(windowLayer.sublayerTransform)) return;
+
+    const CGRect windowBounds = LC32NativeViewBounds(window);
+    const CGRect bounds = LC32NativeViewBounds(view);
+    const UIInterfaceOrientation orientation =
+        LC32WindowSceneOrientation(window, windowBounds);
+    if(!UIInterfaceOrientationIsLandscape(orientation) ||
+            !(windowBounds.size.width > windowBounds.size.height) ||
+            !(windowBounds.size.height > 0)) return;
+
+    const CGAffineTransform oldWindowTurn =
+        /* This is the view's old portrait-to-window transform, not the
+         * inverse compositor transform used by the fixed-canvas adapters. */
+        orientation == UIInterfaceOrientationLandscapeRight
+            ? CGAffineTransformMake(0, 1, -1, 0, 0, 0)
+            : CGAffineTransformMake(0, -1, 1, 0, 0, 0);
+    if(!LC32TransformNearlyEquals(
+            LC32NativeViewTransform(view), oldWindowTurn)) return;
+
+    using GetCenter = CGPoint (*)(id, SEL);
+    static GetCenter getCenter = reinterpret_cast<GetCenter>(
+        class_getMethodImplementation(UIView.class, @selector(center)));
+    const CGPoint center = getCenter(view, @selector(center));
+    constexpr CGFloat epsilon = 0.5;
+    /* Pre-iOS-8 helpers rotate an already-landscape bounds rect and place it
+     * at the portrait screen midpoint. This exact full-screen shape rules
+     * out partial overlays, deliberate scaling, and transition offsets. */
+    if(!isfinite(windowBounds.origin.x) || !isfinite(windowBounds.origin.y) ||
+            !isfinite(windowBounds.size.width) ||
+            !isfinite(windowBounds.size.height) ||
+            !isfinite(bounds.origin.x) || !isfinite(bounds.origin.y) ||
+            !isfinite(bounds.size.width) || !isfinite(bounds.size.height) ||
+            !isfinite(center.x) || !isfinite(center.y) ||
+            fabs(windowBounds.origin.x) >= epsilon ||
+            fabs(windowBounds.origin.y) >= epsilon ||
+            fabs(bounds.origin.x) >= epsilon ||
+            fabs(bounds.origin.y) >= epsilon ||
+            fabs(bounds.size.width - windowBounds.size.width) >= epsilon ||
+            fabs(bounds.size.height - windowBounds.size.height) >= epsilon ||
+            fabs(center.x - windowBounds.size.height * 0.5) >= epsilon ||
+            fabs(center.y - windowBounds.size.width * 0.5) >= epsilon ||
+            LC32LayerContainsRenderer(LC32NativeViewLayer(view))) return;
+
+    /* The scene has already performed this turn. Preserve the controller's
+     * bounds and every descendant transform; only remove the duplicate
+     * window-space turn/translation. Native setters cannot enter guest
+     * geometry overrides from this deferred native main-thread callback. */
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    LC32NativeSetViewTransform(view, CGAffineTransformIdentity);
+    LC32NativeSetViewCenter(view, CGPointMake(
+        CGRectGetMidX(windowBounds), CGRectGetMidY(windowBounds)));
+    [CATransaction commit];
+}
+
 UIViewController *LC32ActiveOrientationController(
         UIViewController *controller) {
     while(controller) {
@@ -1795,6 +1897,32 @@ void LC32AdoptLegacyPhoneCanvases(UIApplication *application) {
 }
 
 } // namespace
+
+extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
+        id object, id addedSubview) {
+    if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000) {
+        return;
+    }
+    if(addedSubview) {
+        /* A selector with this name on an unrelated class need not take an
+         * object argument. Inspect only the known-valid receiver first. */
+        if(![object isKindOfClass:UIWindow.class]) return;
+        object = addedSubview;
+    }
+    if(![object isKindOfClass:UIView.class]) return;
+    UIView *view = (UIView *)object;
+    if(![LC32NativeViewSuperview(view) isKindOfClass:UIWindow.class] ||
+            objc_getAssociatedObject(view, LC32LegacyOverlayLayoutPendingKey)) {
+        return;
+    }
+    objc_setAssociatedObject(view, LC32LegacyOverlayLayoutPendingKey,
+        @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        objc_setAssociatedObject(view, LC32LegacyOverlayLayoutPendingKey,
+            nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LC32FitLegacyControllerOverlay(view);
+    });
+}
 
 extern "C" bool LC32UIKitGetViewDuringGuestLoad(
         id object, id *view) {

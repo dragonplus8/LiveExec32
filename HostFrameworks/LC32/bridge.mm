@@ -3138,6 +3138,18 @@ u64 LC32InvokeHostSelector(u64 host_self, u64 host_cmd, u64 va_args) {
     }
 
     auto finishIndirectArguments = [&](u64 result) -> u64 {
+        /* Legacy controller overlays can apply portrait-window geometry in
+         * several consecutive setters. Let UIKit reconcile it after the
+         * complete guest operation, not between transform/bounds/center. */
+        if(selector == @selector(setTransform:) ||
+                selector == @selector(setBounds:) ||
+                selector == @selector(setCenter:) ||
+                selector == @selector(setFrame:)) {
+            LC32UIKitScheduleLegacyOverlayLayout(receiver, nil);
+        } else if(selector == @selector(addSubview:)) {
+            LC32UIKitScheduleLegacyOverlayLayout(
+                receiver, (id)(uintptr_t)args[0]);
+        }
         for(size_t index = 0; index < 9; index++) {
             if(sizedIndirectGuestStorage[index]) {
                 (void)Dynarmic_mem_1write(

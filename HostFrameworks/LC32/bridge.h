@@ -111,5 +111,6 @@ BOOL host_hook_getClass(const char *name, Class *outClass);
 // guest methods have been mirrored but before the class is registered.
 void LC32UIKitPrepareGuestClass(Class cls);
 bool LC32UIKitGetViewDuringGuestLoad(id controller, id *view);
+void LC32UIKitScheduleLegacyOverlayLayout(id object, id addedSubview);
 
 __END_DECLS
