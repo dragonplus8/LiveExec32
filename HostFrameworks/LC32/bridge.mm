@@ -141,6 +141,8 @@ static void LC32ClearGuestSelfIfEqualWhileSynchronized(
     id hostObject, u32 expectedGuestObject);
 static void LC32ClearGuestSelfIfEqual(id hostObject,
                                       u32 expectedGuestObject);
+static u32 LC32ReleaseNativeProxyOwnership(
+    u32 guestObject, u64 hostAddress, bool releaseHostOwnership);
 
 /*
  * Some native initializers consume the allocation's original +1 even when
@@ -691,6 +693,9 @@ struct LC32HostWeakMappingEntry {
     LC32NativeWeakSlot weakHostObject;
     bool weakCompatible;
     bool invocationRetainCompatible;
+    /* Only ordinary/logical guest decrements acquire this private gate.
+     * Native weak RR and guest weak-retain callbacks never take it. */
+    std::mutex nativeProxyReleaseMutex;
 
     LC32HostWeakMappingEntry(id hostObject, u32 guest, u64 serial,
                              LC32HostMappingLifetime mappingLifetime)
@@ -1609,6 +1614,12 @@ extern "C" u32 LC32UpdateHostMapping(
                 guestObject, static_cast<u32>(hostObject), true);
         case LC32HostMappingGuestRootDealloc:
             return LC32DetachDeadNativePeerGuestKey(guestObject);
+        case LC32HostMappingReleaseNativeProxy:
+            return LC32ReleaseNativeProxyOwnership(
+                guestObject, hostObject, true);
+        case LC32HostMappingReleaseNativeProxyLogicalOwnership:
+            return LC32ReleaseNativeProxyOwnership(
+                guestObject, hostObject, false);
     }
     return 0;
 }
@@ -5958,6 +5969,109 @@ static u8 *LC32GuestMirrorRetiringState(id hostObject) {
         object_getClass(hostObject), LC32GuestMirrorRetiringIvarName);
     if(!ivar) return nullptr;
     return reinterpret_cast<u8 *>(hostObject) + ivar_getOffset(ivar);
+}
+
+static u32 LC32ReleaseNativeProxyOwnership(
+        u32 guestObject, u64 hostAddress, bool releaseHostOwnership) {
+    std::shared_ptr<LC32HostWeakMappingEntry> entry;
+    {
+        LC32HostWeakRegistry &registry = LC32HostWeakMappings();
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        auto iterator = registry.entries.find(guestObject);
+        if(iterator == registry.entries.end() ||
+           iterator->second->expectedHostAddress != hostAddress ||
+           iterator->second->state != LC32HostWeakMappingState::Live ||
+           iterator->second->lifetime != LC32HostMappingLifetime::Pinned ||
+           !iterator->second->weakCompatible ||
+           !iterator->second->invocationRetainCompatible) {
+            return LC32NativeProxyReleaseNotApplicable;
+        }
+        entry = iterator->second;
+    }
+
+    const auto reject = [&]() -> u32 {
+        fprintf(stderr,
+            "LC32: cannot release native proxy guest=0x%x host=0x%llx "
+            "generation=%llu without a live matching lifetime pin\n",
+            guestObject, (unsigned long long)hostAddress,
+            (unsigned long long)entry->generation);
+        return LC32NativeProxyReleaseRejected;
+    };
+
+    /* Never inspect a raw native address before an atomic weak promotion.
+     * The lease also keeps native deallocation from consuming the guest pin
+     * while we decide which part of the guest root count may be released. */
+    id __unsafe_unretained hostObject = LC32LoadWeakRetainedHostObject(
+        &entry->weakHostObject, (id)(uintptr_t)hostAddress);
+    if(!hostObject) return reject();
+    LC32HostInvocationReceiverGuard nativeGuard;
+    (void)nativeGuard.adoptRetained(hostObject);
+
+    /* Synthesized guest classes retain their existing coordinated teardown
+     * contract. This path is only for ordinary native framework objects. */
+    if(LC32GuestMirrorRetiringState(hostObject)) {
+        return LC32NativeProxyReleaseNotApplicable;
+    }
+
+    static std::atomic<u32> releasePrimitive{0};
+    const u32 guestRelease = LC32CachedGuestSymbol(
+        releasePrimitive, "LC32ReleaseGuestNativeProxyOwnership");
+    if(!guestRelease) return reject();
+
+    const auto mappingIsCurrent = [&]() {
+        LC32HostWeakRegistry &registry = LC32HostWeakMappings();
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        auto iterator = registry.entries.find(guestObject);
+        return iterator != registry.entries.end() &&
+            iterator->second.get() == entry.get() &&
+            iterator->second->generation == entry->generation &&
+            entry->expectedHostAddress == hostAddress &&
+            entry->state == LC32HostWeakMappingState::Live &&
+            entry->lifetime == LC32HostMappingLifetime::Pinned &&
+            entry->retirementProvenance ==
+                LC32HostMappingRetirementProvenance::None;
+    };
+
+    /* Use the public peer monitor only to acquire the matching pin. Taking
+     * a guest SideTable lock while holding that monitor could deadlock with
+     * a guest weak load whose native -retainWeakReference uses the monitor.
+     * The pin lease also delays its -dealloc if an association is detached
+     * while this release is in flight. Neither lease is destroyed in a lock. */
+    LC32HostInvocationReceiverGuard pinGuard;
+    LC32GuestLifetimePin *__unsafe_unretained pin = nil;
+    @synchronized(hostObject) {
+        if(!mappingIsCurrent()) return reject();
+        pin = objc_getAssociatedObject(
+            hostObject, LC32GuestLifetimePinKey);
+        if(!pin || pin->guestObject != guestObject ||
+           pin->weakRegistryGeneration != entry->generation) return reject();
+        (void)pinGuard.adoptRetained(LC32RetainOwnedHostObject(pin));
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(entry->nativeProxyReleaseMutex);
+        if(!mappingIsCurrent() || pin->guestObject != guestObject ||
+           pin->weakRegistryGeneration != entry->generation) return reject();
+        /* Serialize only the tiny root-counter primitive. Unlike public
+         * guest_objc_msgSend, LC32InvokeGuestC does not opportunistically drain
+         * unrelated releases, whose callbacks could reenter this private gate.
+         * No peer monitor or registry lock spans this bounded guest call. */
+        u32 args[] = {guestObject};
+        if(!LC32InvokeGuestC(guestRelease, false, 1, args)) return reject();
+    }
+
+    /* A +0 native result can have owners invisible to the guest root count.
+     * An old caller's excess guest release must still reach native reference
+     * counting; it must not destroy the proxy while those owners remain.
+     * This does not make native over-release safe: the caller still needs a
+     * real native +1 to consume. Neither native release nor final lease
+     * destruction may run under the private gate above. */
+    if(releaseHostOwnership) {
+        LC32GuestHostCallQuiescence quiescence;
+        LC32ReleaseOwnedHostObject(hostObject);
+        quiescence.finish();
+    }
+    return LC32NativeProxyReleaseHandled;
 }
 
 static bool LC32GuestMirrorIsRetiring(id hostObject) {

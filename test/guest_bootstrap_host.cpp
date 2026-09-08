@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <iostream>
 #include <limits.h>
@@ -235,6 +236,8 @@ void TestLegacyBundleLayout() {
         CHECK(EnsureLegacyBundleLayout(
             "/", fixture.executable, 0) == 0);
         CHECK(EnsureLegacyBundleLayout(
+            "/private/tmp/../..", fixture.executable, 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
             fixture.home, "/usr/bin/test", 0) == 0);
         CHECK(EnsureLegacyBundleLayout(
             fixture.home, "Game.app/Game", 0) == 0);
@@ -259,6 +262,117 @@ void TestLegacyBundleLayout() {
             fixture.root, fixture.executable, 0) == 0);
         CHECK(!EntryExists(fixture.root + "/" +
             LC32GuestBootstrap::LegacyBundleAliasName));
+    }
+}
+
+void CheckOnlyManagedInnerEntry(const std::string &documents) {
+    DIR *directory = opendir(documents.c_str());
+    CHECK(directory != nullptr);
+    if(!directory) return;
+    unsigned entries = 0;
+    while(struct dirent *entry = readdir(directory)) {
+        if(strcmp(entry->d_name, ".") == 0 ||
+           strcmp(entry->d_name, "..") == 0) continue;
+        CHECK(strcmp(entry->d_name,
+            LC32GuestBootstrap::LegacyBundleInnerAliasName) == 0);
+        ++entries;
+    }
+    CHECK(entries == 1);
+    CHECK(closedir(directory) == 0);
+}
+
+void TestManagedLegacyBundleLayout() {
+    using LC32GuestBootstrap::EnsureLegacyBundleLayout;
+    for(int initial = 0; initial < 4; ++initial) {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string documents = fixture.home + "/Documents";
+        const std::string inner = documents + "/" +
+            LC32GuestBootstrap::LegacyBundleInnerAliasName;
+        fixture.MakeDirectory(documents);
+        fixture.MakeLink(LC32GuestBootstrap::LegacyBundleManagedTarget,
+                         fixture.alias);
+        if(initial == 0) fixture.Track(inner);
+        if(initial == 1) fixture.MakeLink(fixture.bundle, inner);
+        if(initial == 2) fixture.MakeLink(fixture.root + "/removed.app", inner);
+        if(initial == 3) fixture.MakeLink(fixture.executable, inner);
+        struct stat outerBefore = {};
+        CHECK(lstat(fixture.alias.c_str(), &outerBefore) == 0);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0) == 0);
+        CHECK(ReadLink(inner) == fixture.bundle);
+        CHECK(ReadLink(fixture.alias) ==
+            LC32GuestBootstrap::LegacyBundleManagedTarget);
+        struct stat outerAfter = {}, innerBefore = {}, innerAfter = {};
+        CHECK(lstat(fixture.alias.c_str(), &outerAfter) == 0);
+        CHECK(outerAfter.st_ino == outerBefore.st_ino);
+        CHECK(lstat(inner.c_str(), &innerBefore) == 0);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0) == 0);
+        CHECK(lstat(inner.c_str(), &innerAfter) == 0);
+        CHECK(innerAfter.st_ino == innerBefore.st_ino);
+        CHECK(EntryExists(fixture.executable));
+        struct stat followed = {}, bundle = {};
+        CHECK(stat(fixture.alias.c_str(), &followed) == 0);
+        CHECK(stat(fixture.bundle.c_str(), &bundle) == 0);
+        CHECK(followed.st_dev == bundle.st_dev && followed.st_ino == bundle.st_ino);
+        CheckOnlyManagedInnerEntry(documents);
+    }
+    for(int conflict = 0; conflict < 2; ++conflict) {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string documents = fixture.home + "/Documents";
+        const std::string inner = documents + "/" +
+            LC32GuestBootstrap::LegacyBundleInnerAliasName;
+        fixture.MakeDirectory(documents);
+        fixture.MakeLink(LC32GuestBootstrap::LegacyBundleManagedTarget,
+                         fixture.alias);
+        if(conflict == 0) fixture.MakeFile(inner);
+        else {
+            fixture.MakeDirectory(inner);
+            fixture.MakeFile(inner + "/user-data");
+        }
+        struct stat before = {}, after = {};
+        CHECK(lstat(inner.c_str(), &before) == 0);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0) == EEXIST);
+        CHECK(lstat(inner.c_str(), &after) == 0);
+        CHECK(before.st_ino == after.st_ino && before.st_mode == after.st_mode);
+        if(conflict == 1) CHECK(EntryExists(inner + "/user-data"));
+    }
+    for(int kind = 0; kind < 3; ++kind) {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string documents = fixture.home + "/Documents";
+        const std::string outside = fixture.root + "/Outside";
+        fixture.MakeDirectory(outside);
+        if(kind == 1) fixture.MakeLink(outside, documents);
+        if(kind == 2) fixture.MakeFile(documents);
+        fixture.MakeLink(LC32GuestBootstrap::LegacyBundleManagedTarget,
+                         fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0) != 0);
+        CHECK(!EntryExists(outside + "/" +
+            LC32GuestBootstrap::LegacyBundleInnerAliasName));
+        CHECK(ReadLink(fixture.alias) ==
+            LC32GuestBootstrap::LegacyBundleManagedTarget);
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string documents = fixture.home + "/Documents";
+        fixture.MakeDirectory(documents);
+        fixture.MakeLink("Documents/./.LiveExec32.app", fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0) == EEXIST);
+        CHECK(!EntryExists(documents + "/" +
+            LC32GuestBootstrap::LegacyBundleInnerAliasName));
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string documents = fixture.home + "/Documents";
+        fixture.MakeDirectory(documents);
+        fixture.MakeLink(LC32GuestBootstrap::LegacyBundleManagedTarget,
+                         fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, fixture.executable, 0x80000) == 0);
+        CHECK(!EntryExists(documents + "/" +
+            LC32GuestBootstrap::LegacyBundleInnerAliasName));
     }
 }
 
@@ -577,6 +691,7 @@ int main() {
     TestConfiguredHomeDirectory();
     TestConfiguredHomeResolution();
     TestLegacyBundleLayout();
+    TestManagedLegacyBundleLayout();
     TestEnvironmentSelection();
     TestEnvironmentFinalization();
     TestDyldPrintOptIn();

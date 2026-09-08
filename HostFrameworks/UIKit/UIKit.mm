@@ -88,6 +88,10 @@ const void *LC32LegacyDirectWindowSublayerTransformKey =
     &LC32LegacyDirectWindowSublayerTransformKey;
 const void *LC32LegacyDirectWindowAppliedSublayerTransformKey =
     &LC32LegacyDirectWindowAppliedSublayerTransformKey;
+const void *LC32LegacyWindowLayersLayoutPendingKey =
+    &LC32LegacyWindowLayersLayoutPendingKey;
+const void *LC32LegacyRootlessWindowPlacementKey =
+    &LC32LegacyRootlessWindowPlacementKey;
 const void *LC32LegacyOverlayLayoutPendingKey =
     &LC32LegacyOverlayLayoutPendingKey;
 const void *LC32LegacyRootWindowGeometryKey =
@@ -160,6 +164,13 @@ UIView *LC32NativeViewSuperview(UIView *view) {
     return view ? getter(view, @selector(superview)) : nil;
 }
 
+UIWindow *LC32NativeViewWindow(UIView *view) {
+    using Getter = UIWindow *(*)(id, SEL);
+    static Getter getter = reinterpret_cast<Getter>(
+        class_getMethodImplementation(UIView.class, @selector(window)));
+    return view ? getter(view, @selector(window)) : nil;
+}
+
 BOOL LC32NativeViewHidden(UIView *view) {
     using Getter = BOOL (*)(id, SEL);
     static Getter getter = reinterpret_cast<Getter>(
@@ -192,6 +203,13 @@ CGAffineTransform LC32NativeViewTransform(UIView *view) {
                                       @selector(transform)));
     return view ? getter(view, @selector(transform))
                 : CGAffineTransformIdentity;
+}
+
+CGPoint LC32NativeViewCenter(UIView *view) {
+    using Getter = CGPoint (*)(id, SEL);
+    static Getter getter = reinterpret_cast<Getter>(
+        class_getMethodImplementation(UIView.class, @selector(center)));
+    return view ? getter(view, @selector(center)) : CGPointZero;
 }
 
 void LC32NativeSetViewBounds(UIView *view, CGRect bounds) {
@@ -1043,6 +1061,189 @@ void LC32RestoreLegacyDirectWindowSublayerTransform(
         nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+bool LC32LegacyLayerPreservesPortraitCanvas(CALayer *layer) {
+    const CGRect bounds = layer.bounds;
+    const CGPoint position = layer.position;
+    const CGPoint anchor = layer.anchorPoint;
+    constexpr CGFloat epsilon = 0.5;
+    return fabs(bounds.origin.x) < epsilon &&
+        fabs(bounds.origin.y) < epsilon &&
+        fabs(bounds.size.width - 320) < epsilon &&
+        fabs(bounds.size.height - 480) < epsilon &&
+        fabs(position.x - anchor.x * bounds.size.width) < epsilon &&
+        fabs(position.y - anchor.y * bounds.size.height) < epsilon &&
+        CATransform3DIsIdentity(layer.transform) &&
+        CATransform3DIsIdentity(layer.sublayerTransform);
+}
+
+bool LC32FindLegacyNestedPortraitRenderer(
+        CALayer *layer, Class rendererClass, bool portraitAncestors,
+        unsigned depth, unsigned &remainingLayers, CALayer *&renderer) {
+    /* Inspect native backing layers only. Guest CALayer overrides can enter
+     * the emulator even for a getter; an unfamiliar or overly deep tree is
+     * not evidence that its compositor is missing. */
+    if(!layer || !remainingLayers || depth > 32 ||
+            LC32ObjectUsesGuestClass(layer)) return false;
+    --remainingLayers;
+    const bool portraitChain = portraitAncestors &&
+        LC32LegacyLayerPreservesPortraitCanvas(layer);
+    if([layer isKindOfClass:rendererClass]) {
+        if(!portraitChain || renderer) return false;
+        renderer = layer;
+    }
+    for(CALayer *child in layer.sublayers) {
+        if(!LC32FindLegacyNestedPortraitRenderer(child, rendererClass,
+                portraitChain, depth + 1, remainingLayers, renderer)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool LC32LegacyWindowHasAncestorCompositor(
+        CALayer *windowLayer, CATransform3D allowedWindowTransform) {
+    if(!CATransform3DEqualToTransform(
+            windowLayer.transform, allowedWindowTransform)) return true;
+    unsigned remainingLayers = 32;
+    for(CALayer *layer = windowLayer.superlayer; layer;
+            layer = layer.superlayer) {
+        if(!remainingLayers-- || LC32ObjectUsesGuestClass(layer) ||
+                !CATransform3DIsIdentity(layer.transform) ||
+                !CATransform3DIsIdentity(layer.sublayerTransform)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool LC32WindowUsesRootlessPhoneCanvas(UIWindow *window) {
+    return window && window.guest_selfOrNull &&
+        LC32GetGuestExecutableSDKVersion() < 0x80000 &&
+        LC32GuestUsesFixedLandscapePhoneCanvas() &&
+        [LC32NativeWindowRootViewController(window)
+            isKindOfClass:LC32LegacyWindowRootController.class];
+}
+
+struct LC32LegacyRootlessWindowPlacement {
+    CGAffineTransform originalTransform;
+    CGAffineTransform appliedTransform;
+    CGPoint originalCenter;
+    CGPoint appliedCenter;
+    bool yielded;
+};
+
+void LC32SaveRootlessWindowPlacement(
+        UIWindow *window, const LC32LegacyRootlessWindowPlacement &placement) {
+    objc_setAssociatedObject(window, LC32LegacyRootlessWindowPlacementKey,
+        [NSValue value:&placement
+            withObjCType:@encode(LC32LegacyRootlessWindowPlacement)],
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+bool LC32ReadRootlessWindowPlacement(
+        UIWindow *window, LC32LegacyRootlessWindowPlacement &placement) {
+    NSValue *value = objc_getAssociatedObject(
+        window, LC32LegacyRootlessWindowPlacementKey);
+    if(!value) return false;
+    [value getValue:&placement size:sizeof(placement)];
+    return true;
+}
+
+bool LC32ReconcileRootlessWindowPlacement(
+        UIWindow *window, CALayer *layer, bool restore) {
+    LC32LegacyRootlessWindowPlacement placement;
+    if(!LC32ReadRootlessWindowPlacement(window, placement) ||
+            placement.yielded || !layer || LC32ObjectUsesGuestClass(layer)) {
+        return false;
+    }
+    const bool ownsTransform = CATransform3DEqualToTransform(
+        layer.transform, CATransform3DMakeAffineTransform(
+            placement.appliedTransform));
+    const bool ownsCenter = CGPointEqualToPoint(
+        LC32NativeViewCenter(window), placement.appliedCenter);
+    if(ownsTransform && ownsCenter && !restore) return true;
+
+    /* An application/scene can take over either component independently.
+     * Restore only the pieces still ours, then stop fitting this window if
+     * another owner intervened. Otherwise the next pass could silently
+     * replace an authored center after restoring our scale to identity. */
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if(ownsTransform) {
+        LC32NativeSetViewTransform(window, placement.originalTransform);
+    }
+    if(ownsCenter) LC32NativeSetViewCenter(window, placement.originalCenter);
+    [CATransaction commit];
+    if(!ownsTransform || !ownsCenter) {
+        placement.yielded = true;
+        LC32SaveRootlessWindowPlacement(window, placement);
+    } else {
+        objc_setAssociatedObject(window, LC32LegacyRootlessWindowPlacementKey,
+            nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return false;
+}
+
+void LC32FitRootlessWindowPlacement(UIWindow *window, CALayer *layer) {
+    /* Do not resize the guest window: its local 480x320 bounds and every
+     * locked 320x480 drawable must survive. Moving/scaling the native window
+     * also keeps UIKit hit-testing aligned with the visible content, unlike
+     * drawing enlarged sublayers beyond the original window hit region. */
+    const CGRect bounds = layer.bounds;
+    const CGPoint anchor = layer.anchorPoint;
+    if(LC32ObjectUsesGuestClass(window) || !window.windowScene ||
+            !CGRectEqualToRect(bounds, CGRectMake(0, 0, 480, 320)) ||
+            !CGPointEqualToPoint(anchor, CGPointMake(0.5, 0.5))) {
+        LC32ReconcileRootlessWindowPlacement(window, layer, true);
+        return;
+    }
+    LC32LegacyRootlessWindowPlacement placement;
+    const bool hasPlacement = LC32ReadRootlessWindowPlacement(window, placement);
+    if(hasPlacement && placement.yielded) return;
+    const CGAffineTransform current = LC32NativeViewTransform(window);
+    if(!hasPlacement && !CGAffineTransformIsIdentity(current)) return;
+    const CGPoint center = LC32NativeViewCenter(window);
+    const CGRect viewport = LC32LegacyViewportInView(window, window);
+    /* The window can reach landscape before its scene/source space settles.
+     * Do not claim placement ownership in that provisional portrait space:
+     * UIKit's subsequent ordinary recenter is not an application takeover. */
+    if(!(viewport.size.width > viewport.size.height) ||
+            !(viewport.size.height > 0) || !isfinite(viewport.size.width) ||
+            !isfinite(viewport.size.height)) return;
+    /* Coordinate conversion removes our existing scale. Put the viewport
+     * back into the native parent space before fitting, so repeated passes
+     * neither compound nor cancel the previous placement. */
+    const CGFloat scale = MIN(viewport.size.width / bounds.size.width,
+                              viewport.size.height / bounds.size.height) *
+        current.a;
+    const CGPoint targetCenter = {
+        center.x + (CGRectGetMidX(viewport) - CGRectGetMidX(bounds)) * current.a,
+        center.y + (CGRectGetMidY(viewport) - CGRectGetMidY(bounds)) * current.d,
+    };
+    if(!(scale > 0) || !isfinite(scale) || !isfinite(targetCenter.x) ||
+            !isfinite(targetCenter.y)) return;
+    const CGAffineTransform target = CGAffineTransformMakeScale(scale, scale);
+    if(!hasPlacement && CGAffineTransformEqualToTransform(current, target) &&
+            CGPointEqualToPoint(center, targetCenter)) return;
+    if(!hasPlacement) {
+        placement.originalTransform = current;
+        placement.originalCenter = center;
+        placement.yielded = false;
+    }
+    placement.appliedTransform = target;
+    placement.appliedCenter = targetCenter;
+    LC32SaveRootlessWindowPlacement(window, placement);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if(!CGAffineTransformEqualToTransform(current, target)) {
+        LC32NativeSetViewTransform(window, target);
+    }
+    if(!CGPointEqualToPoint(center, targetCenter)) {
+        LC32NativeSetViewCenter(window, targetCenter);
+    }
+    [CATransaction commit];
+}
+
 bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
     if(!window) return false;
 
@@ -1051,23 +1252,30 @@ bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
     NSValue *savedTransform = objc_getAssociatedObject(
         window, LC32LegacyDirectWindowSublayerTransformKey);
     CALayer *windowLayer = LC32NativeViewLayer(window);
-    if(!directRootState.boolValue) {
+    UIViewController *nativeRoot = LC32NativeWindowRootViewController(window);
+    const bool rootlessPhoneCanvas = LC32WindowUsesRootlessPhoneCanvas(window);
+    const bool ownsWindowPlacement = LC32ReconcileRootlessWindowPlacement(
+        window, windowLayer, !rootlessPhoneCanvas);
+    if(!directRootState.boolValue && !rootlessPhoneCanvas) {
         LC32RestoreLegacyDirectWindowSublayerTransform(
             window, windowLayer, savedTransform);
         return false;
     }
 
     /* This path emulates the pre-scene UIWindow compositor for main-nib
-     * games whose renderer and hidden bookkeeping root are direct siblings.
+     * games whose renderer and hidden bookkeeping root are direct siblings,
+     * or rootless engines with a nested, fixed portrait drawable.
      * Changing UIView geometry or reparenting either object synchronously
      * invokes the guest EAGLView's layoutSubviews before engine-owned state
      * is initialized. A parent-layer transform changes presentation and
      * coordinate conversion without invalidating that 320x480 drawable. */
     if(!windowLayer) return true;
+    if(rootlessPhoneCanvas && LC32ObjectUsesGuestClass(windowLayer))
+        return true;
     static const bool isCoreSimulator =
         getenv("SIMULATOR_UDID") != nullptr ||
         getenv("SIMULATOR_DEVICE_NAME") != nullptr;
-    if(!isCoreSimulator) {
+    if(!isCoreSimulator && !rootlessPhoneCanvas) {
         LC32RestoreLegacyDirectWindowSublayerTransform(
             window, windowLayer, savedTransform);
         return true;
@@ -1101,13 +1309,19 @@ bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
         }
     }
     const CGRect windowBounds = windowLayer.bounds;
+    const CATransform3D allowedWindowTransform = ownsWindowPlacement
+        ? windowLayer.transform : CATransform3DIdentity;
     const bool alreadyHasNativeCompositor =
-        !LC32TransformNearlyEquals(
-            LC32NativeViewTransform(window), CGAffineTransformIdentity) ||
+        (!ownsWindowPlacement && !LC32TransformNearlyEquals(
+            LC32NativeViewTransform(window), CGAffineTransformIdentity)) ||
+        (rootlessPhoneCanvas &&
+         LC32LegacyWindowHasAncestorCompositor(
+             windowLayer, allowedWindowTransform)) ||
         (!savedTransform &&
          !CATransform3DIsIdentity(windowLayer.sublayerTransform));
     if(alreadyHasNativeCompositor ||
             !(windowBounds.size.width > windowBounds.size.height)) {
+        LC32ReconcileRootlessWindowPlacement(window, windowLayer, true);
         LC32RestoreLegacyDirectWindowSublayerTransform(
             window, windowLayer, savedTransform);
         return true;
@@ -1115,36 +1329,52 @@ bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
 
     Class eaglLayerClass = NSClassFromString(@"CAEAGLLayer");
     CALayer *portraitRenderer = nil;
-    for(CALayer *layer in windowLayer.sublayers) {
-        if(eaglLayerClass && [layer isKindOfClass:eaglLayerClass]) {
-            const CGRect bounds = layer.bounds;
-            if(fabs(bounds.size.width - 320) < 0.5 &&
-                    fabs(bounds.size.height - 480) < 0.5) {
-                if(portraitRenderer) {
-                    LC32RestoreLegacyDirectWindowSublayerTransform(
-                        window, windowLayer, savedTransform);
-                    return true;
+    if(rootlessPhoneCanvas && eaglLayerClass) {
+        unsigned remainingLayers = 1024;
+        for(CALayer *layer in windowLayer.sublayers) {
+            if(!LC32FindLegacyNestedPortraitRenderer(layer, eaglLayerClass,
+                    true, 0, remainingLayers, portraitRenderer)) {
+                LC32ReconcileRootlessWindowPlacement(window, windowLayer, true);
+                LC32RestoreLegacyDirectWindowSublayerTransform(
+                    window, windowLayer, savedTransform);
+                return true;
+            }
+        }
+    } else {
+        for(CALayer *layer in windowLayer.sublayers) {
+            if(eaglLayerClass && [layer isKindOfClass:eaglLayerClass]) {
+                const CGRect bounds = layer.bounds;
+                if(fabs(bounds.size.width - 320) < 0.5 &&
+                        fabs(bounds.size.height - 480) < 0.5) {
+                    if(portraitRenderer) {
+                        LC32RestoreLegacyDirectWindowSublayerTransform(
+                            window, windowLayer, savedTransform);
+                        return true;
+                    }
+                    portraitRenderer = layer;
                 }
-                portraitRenderer = layer;
             }
         }
     }
     if(!portraitRenderer || !LC32TransformNearlyEquals(
             portraitRenderer.affineTransform,
             CGAffineTransformIdentity)) {
+        LC32ReconcileRootlessWindowPlacement(window, windowLayer, true);
         LC32RestoreLegacyDirectWindowSublayerTransform(
             window, windowLayer, savedTransform);
         return true;
     }
 
     const UIInterfaceOrientation orientation =
-        LC32GuestInterfacePolicy().preferredOrientation;
+        rootlessPhoneCanvas ? LC32LegacyTargetOrientation(nativeRoot)
+                            : LC32GuestInterfacePolicy().preferredOrientation;
     CGFloat angle;
     if(orientation == UIInterfaceOrientationLandscapeLeft) {
         angle = M_PI_2;
     } else if(orientation == UIInterfaceOrientationLandscapeRight) {
         angle = -M_PI_2;
     } else {
+        LC32ReconcileRootlessWindowPlacement(window, windowLayer, true);
         LC32RestoreLegacyDirectWindowSublayerTransform(
             window, windowLayer, savedTransform);
         return true;
@@ -1203,7 +1433,25 @@ bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
     objc_setAssociatedObject(
         window, LC32LegacyDirectWindowAppliedSublayerTransformKey,
         desiredValue, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if(rootlessPhoneCanvas) LC32FitRootlessWindowPlacement(window, windowLayer);
     return true;
+}
+
+void LC32ScheduleRootlessWindowLayerLayout(UIWindow *window) {
+    if(!LC32WindowUsesRootlessPhoneCanvas(window) ||
+            objc_getAssociatedObject(
+                window, LC32LegacyWindowLayersLayoutPendingKey)) return;
+    objc_setAssociatedObject(window, LC32LegacyWindowLayersLayoutPendingKey,
+        @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    /* Early engines add their renderer to an existing nested canvas after
+     * the initial makeKeyAndVisible/orientation calls. Coalesce insertions
+     * and inspect the settled native layer hierarchy without forcing guest
+     * layout or scanning on display frames/global UIView layout callbacks. */
+    dispatch_async(dispatch_get_main_queue(), ^{
+        objc_setAssociatedObject(window, LC32LegacyWindowLayersLayoutPendingKey,
+            nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        LC32FitLegacyDirectWindowLayers(window);
+    });
 }
 
 LC32LegacyIPadGeometryMode LC32LegacyPhoneCanvasGeometryMode(
@@ -2081,6 +2329,9 @@ extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
     if(addedSubview) {
         /* A selector with this name on an unrelated class need not take an
          * object argument. Inspect only the known-valid receiver first. */
+        if(![object isKindOfClass:UIView.class]) return;
+        LC32ScheduleRootlessWindowLayerLayout(
+            LC32NativeViewWindow((UIView *)object));
         if(![object isKindOfClass:UIWindow.class]) return;
         object = addedSubview;
     }

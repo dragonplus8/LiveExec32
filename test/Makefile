@@ -26,7 +26,8 @@ check-coremedia-time-values-host: $(COREMEDIA_TIME_VALUES_HOST_TEST)
 
 $(GUEST_BOOTSTRAP_HOST_TEST): guest_bootstrap_host.cpp \
   ../HostFrameworks/LC32/guest_bootstrap.cpp \
-  ../HostFrameworks/LC32/guest_bootstrap.h
+  ../HostFrameworks/LC32/guest_bootstrap.h \
+  ../include/LC32LegacyBundleLayout.h
 	@mkdir -p "$(HOST_TEST_OUTPUT_DIR)"
 	$(HOST_CXX) $(HOST_CXXFLAGS) \
 		-I"$(abspath ../HostFrameworks/LC32)" \
@@ -188,6 +189,7 @@ $(eval $(call lc32_guest_test,lc32-mediaplayer-legacy,mediaplayer_legacy.m,Media
 $(eval $(call lc32_guest_test,lc32-nsrange-bridge,nsrange_bridge.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-nsvalue-bytes,nsvalue_bytes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-nullable-guest-cstring,nullable_guest_cstring.c,LC32))
+$(eval $(call lc32_guest_test,lc32-native-proxy-release,native_proxy_release.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-owned-create-copy,owned_create_copy.m,CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-ownership-publication-race,ownership_publication_race.m ownership_publication_race_weak.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-pointer-out-params,pointer_out_params.m,Foundation LC32))
@@ -223,6 +225,7 @@ $(eval $(call lc32_guest_test,lc32-uikit-image-context,uikit_image_context.m,Fou
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-device,uikit_legacy_device.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-overlay,uikit_legacy_overlay.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-root-geometry,uikit_legacy_root_geometry.m,Foundation UIKit QuartzCore CoreGraphics LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-legacy-nested-renderer,uikit_legacy_nested_renderer.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-orientation-startup,uikit_orientation_startup.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-string-sizing,uikit_legacy_string_sizing.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-window-root,uikit_legacy_window_root.m,Foundation UIKit CoreGraphics LC32))
@@ -269,6 +272,10 @@ lc32-uikit-legacy-overlay_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
 lc32-uikit-legacy-overlay_LDFLAGS += -target armv7s-apple-ios7.0
 lc32-uikit-legacy-root-geometry_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
 lc32-uikit-legacy-root-geometry_LDFLAGS += -target armv7s-apple-ios7.0
+lc32-uikit-legacy-nested-renderer_USE_MODULES := 1
+lc32-uikit-legacy-nested-renderer_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0 \
+	-I$(abspath ../GuestFrameworks) -I$(abspath ../include)
+lc32-uikit-legacy-nested-renderer_LDFLAGS += -target armv7s-apple-ios7.0
 lc32-uikit-orientation-startup_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
 lc32-uikit-orientation-startup_LDFLAGS += -target armv7s-apple-ios7.0
 # Per-source flags follow Theos' DEBUG_CFLAGS, which otherwise restore -O0.
@@ -279,6 +286,15 @@ lc32-cxx-lifecycle_CCFLAGS := -std=c++14
 lc32-iconv-smoke_LDFLAGS += -liconv
 
 lc32-guest-proxy-lifetime_CFLAGS := -I$(abspath ../include)
+lc32-native-proxy-release_USE_MODULES := 1
+lc32-native-proxy-release_CFLAGS := -fno-objc-arc \
+	-I$(abspath ../GuestFrameworks) -I$(abspath ../include)
+# Theos has one recursive instance per executable. Its DEBUG schema adds -O0
+# after target CFLAGS, so select the optimization for this instance explicitly.
+ifeq ($(THEOS_CURRENT_INSTANCE),lc32-native-proxy-release)
+OPTFLAG = -O2
+DEBUG.CFLAGS := $(filter-out -O0,$(DEBUG.CFLAGS)) $(OPTFLAG)
+endif
 lc32-nsrange-bridge_USE_MODULES := 1
 lc32-nsrange-bridge_CFLAGS := -I$(abspath ../GuestFrameworks) -I$(abspath ../include)
 lc32-scalar-pointer-bridge_USE_MODULES := 1

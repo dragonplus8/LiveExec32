@@ -453,6 +453,21 @@ uint32_t LC32ReleaseGuestLifetimePin(id object) {
     return releasedToZero;
 }
 
+uint32_t LC32ReleaseGuestNativeProxyOwnership(id object) {
+    /* The host holds native/pin leases and the mapping's private release gate.
+     * Every ordinary/logical decrement for this native proxy uses that same
+     * gate, and its lifetime pin cannot disappear while those leases
+     * are held. Strong/weak retains can only increase the count concurrently.
+     * Do not message the object or run arbitrary guest cleanup here: the host
+     * invokes this primitive without draining deferred releases. */
+    if(!object || _objc_rootIsDeallocating(object)) return 0;
+    const uintptr_t count = _objc_rootRetainCount(object);
+    if(!count) return 0;
+    if(count == 1 || count == UINTPTR_MAX) return 1;
+    if(_objc_rootReleaseWasZero(object)) abort();
+    return 1;
+}
+
 static BOOL LC32OperationTraceEnabled(void) {
     pthread_once(&LC32OperationTraceOnce, LC32InitializeOperationTrace);
     return LC32OperationTraceIsEnabled;
@@ -691,6 +706,12 @@ void *LC32GetAssociatedGuestBuffer(id object, uint32_t requiredCapacity) {
         return;
     }
 
+    const uint32_t nativeProxyResult = LC32UpdateHostMapping(
+        (uint32_t)(uintptr_t)self,
+        LC32HostMappingReleaseNativeProxyLogicalOwnership, hostSelf);
+    if(nativeProxyResult == LC32NativeProxyReleaseHandled) return;
+    if(nativeProxyResult != LC32NativeProxyReleaseNotApplicable) abort();
+
     // Unlike the lifetime-pin release, this is an ordinary guest ownership
     // decrement, but the native autorelease token owns the paired host +1.
     const uint32_t guestSelf = (uint32_t)(uintptr_t)self;
@@ -740,6 +761,10 @@ void *LC32GetAssociatedGuestBuffer(id object, uint32_t requiredCapacity) {
     LC32_OPERATION_TRACE("release", self, hostSelf);
 
     const uint32_t guestSelf = (uint32_t)(uintptr_t)self;
+    const uint32_t nativeProxyResult = LC32UpdateHostMapping(
+        guestSelf, LC32HostMappingReleaseNativeProxy, hostSelf);
+    if(nativeProxyResult == LC32NativeProxyReleaseHandled) return;
+    if(nativeProxyResult != LC32NativeProxyReleaseNotApplicable) abort();
     /* The zero-reporting root primitive makes the final-release decision
      * atomic with racing strong/weak retains.  Keep the Retiring mapping
      * available through arbitrary guest -dealloc code, then erase only its

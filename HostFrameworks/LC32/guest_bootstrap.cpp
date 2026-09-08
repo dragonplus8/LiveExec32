@@ -2,7 +2,9 @@
 
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <limits>
 #include <limits.h>
@@ -41,6 +43,69 @@ struct DirectoryDescriptor {
     }
 };
 
+bool IsManagedOuterAlias(int home) {
+    char target[sizeof(LegacyBundleManagedTarget)];
+    const ssize_t length = readlinkat(
+        home, LegacyBundleAliasName, target, sizeof(target));
+    return length == sizeof(LegacyBundleManagedTarget) - 1 &&
+        memcmp(target, LegacyBundleManagedTarget, length) == 0;
+}
+
+int UpdateManagedInnerAlias(int home, const char *resolvedBundle,
+                           const struct stat &bundleMetadata) {
+    DirectoryDescriptor documents{openat(home, "Documents",
+        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
+    if(documents.value < 0) return errno;
+
+    struct stat existing = {};
+    if(fstatat(documents.value, LegacyBundleInnerAliasName, &existing,
+            AT_SYMLINK_NOFOLLOW) != 0) {
+        if(errno != ENOENT) return errno;
+        if(symlinkat(resolvedBundle, documents.value,
+                LegacyBundleInnerAliasName) == 0) return 0;
+        if(errno != EEXIST) return errno;
+        // A concurrent launch may have installed the managed symlink.
+        if(fstatat(documents.value, LegacyBundleInnerAliasName, &existing,
+                AT_SYMLINK_NOFOLLOW) != 0) return errno;
+    }
+    if(!S_ISLNK(existing.st_mode)) return EEXIST;
+    struct stat target = {};
+    if(fstatat(documents.value, LegacyBundleInnerAliasName, &target, 0) == 0 &&
+            target.st_dev == bundleMetadata.st_dev &&
+            target.st_ino == bundleMetadata.st_ino) return 0;
+
+    /* The exact outer-link convention designates this inner symlink as
+     * runtime-managed, even if an earlier bundle target is now missing or
+     * elsewhere. Never follow/delete its old target. Stage the new link in
+     * the same validated Documents directory, then atomically publish it. */
+    char temporaryName[80];
+    bool temporaryCreated = false;
+    for(unsigned attempt = 0; attempt < 8; ++attempt) {
+        unsigned long long nonce = 0;
+        arc4random_buf(&nonce, sizeof(nonce));
+        snprintf(temporaryName, sizeof(temporaryName),
+            ".LiveExec32.app.%016llx.tmp", nonce);
+        if(symlinkat(resolvedBundle, documents.value, temporaryName) == 0) {
+            temporaryCreated = true;
+            break;
+        }
+        if(errno != EEXIST) return errno;
+    }
+    if(!temporaryCreated) return EEXIST;
+    int error = 0;
+    if(fstatat(documents.value, LegacyBundleInnerAliasName, &existing,
+            AT_SYMLINK_NOFOLLOW) != 0) {
+        error = errno;
+    } else if(!S_ISLNK(existing.st_mode)) {
+        error = EEXIST;
+    } else if(renameat(documents.value, temporaryName,
+                      documents.value, LegacyBundleInnerAliasName) != 0) {
+        error = errno;
+    }
+    if(error != 0) (void)unlinkat(documents.value, temporaryName, 0);
+    return error;
+}
+
 } // anonymous namespace
 
 std::string SelectConfiguredHomeDirectory(
@@ -70,6 +135,9 @@ int EnsureLegacyBundleLayout(
             executablePath.empty() || executablePath.front() != '/') {
         return 0;
     }
+    char resolvedHome[PATH_MAX];
+    if(realpath(configuredHome.c_str(), resolvedHome) &&
+            resolvedHome[1] == '\0') return 0;
 
     const std::size_t slash = executablePath.find_last_of('/');
     const std::string bundlePath = executablePath.substr(0, slash);
@@ -115,6 +183,12 @@ int EnsureLegacyBundleLayout(
 
     struct stat bundleMetadata = {};
     if(fstat(bundle.value, &bundleMetadata) != 0) return errno;
+    // The installer owns the outer link because an app sandbox cannot create
+    // entries at HOME's root. The app can maintain the inner Documents link.
+    if(IsManagedOuterAlias(home.value)) {
+        return UpdateManagedInnerAlias(
+            home.value, resolvedBundle, bundleMetadata);
+    }
     auto checkExistingAlias = [&]() {
         struct stat entry = {};
         if(fstatat(home.value, LegacyBundleAliasName, &entry,

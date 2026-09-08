@@ -81,7 +81,20 @@ typedef enum LC32HostMappingOperation {
      * reused. Detach a dead native peer's guest key but keep its host-address
      * tombstone for deferred native lifetime-pin cleanup. */
     LC32HostMappingGuestRootDealloc = 6,
+    /* Native-created proxies have a guest lifetime pin, but may also have
+     * native-only owners. Release their ordinary guest ownership under a
+     * private per-mapping gate without ever consuming that pin. The ordinary
+     * variant also consumes the native +1; the logical variant leaves that
+     * release to its native autorelease token. Returns the result enum below. */
+    LC32HostMappingReleaseNativeProxy = 7,
+    LC32HostMappingReleaseNativeProxyLogicalOwnership = 8,
 } LC32HostMappingOperation;
+
+enum {
+    LC32NativeProxyReleaseNotApplicable = 0,
+    LC32NativeProxyReleaseHandled = 1,
+    LC32NativeProxyReleaseRejected = 2,
+};
 
 typedef struct LC32HostObjectArrayDescriptor {
     uint32_t count;
