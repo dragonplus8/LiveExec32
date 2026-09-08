@@ -33,6 +33,14 @@ static void LC32ResolveDelayedTimerHostFunction(void) {
         "LC32_Foundation_CreateDelayedTimer", YES);
 }
 
+static pthread_once_t LC32RecordLastSelectorHostOnce = PTHREAD_ONCE_INIT;
+static uint64_t LC32RecordLastSelectorHostFunction;
+
+static void LC32ResolveRecordLastSelectorHostFunction(void) {
+    LC32RecordLastSelectorHostFunction = LC32Dlsym(
+        "LC32_Foundation_RecordLastGuestSelector", YES);
+}
+
 static void LC32RegisterDelayedPerform(
         LC32DelayedPerformRequest *request) {
     pthread_mutex_lock(&LC32DelayedPerformLock);
