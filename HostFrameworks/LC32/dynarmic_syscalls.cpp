@@ -1615,6 +1615,28 @@ guest_mach_msg_trap(u32 guest_msg,
             host_header->msgh_size = sizeof(*reply);
             break;
         }
+        case 3605: // thread_suspend
+        case 3606: { // thread_resume
+            /* Both ARM32 requests contain only the Mach header. These are
+             * logical guest-thread operations, never host thread_suspend on
+             * the synthetic port or the emulator's native pthread. */
+            const bool validRequest = send_size == sizeof(mach_msg_header_t) &&
+                (request_bits & MACH_MSGH_BITS_COMPLEX) == 0;
+            if (rcv_size < sizeof(mig_reply_error_t)) {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+            const kern_return_t kr = validRequest
+                ? ChangeGuestThreadSuspendCount(
+                    host_header->msgh_request_port, host_header->msgh_id == 3605)
+                : MIG_BAD_ARGUMENTS;
+            auto *reply = reinterpret_cast<mig_reply_error_t *>(host_header);
+            reply->NDR = NDR_record;
+            reply->RetCode = kr;
+            host_header->msgh_size = sizeof(*reply);
+            break;
+        }
         case 3603: { // thread_get_state
             /*
              * thread_act.defs uses natural_t arrays, so this wire layout is

@@ -12,6 +12,16 @@ cat > "$work/expected" <<'EOF'
 NSDefaultRunLoopMode Foundation CoreFoundation
 NSFontAttributeName Foundation UIKit
 NSGregorianCalendar Foundation CoreFoundation
+NSBuddhistCalendar Foundation CoreFoundation
+NSChineseCalendar Foundation CoreFoundation
+NSHebrewCalendar Foundation CoreFoundation
+NSISO8601Calendar Foundation CoreFoundation
+NSIndianCalendar Foundation CoreFoundation
+NSIslamicCalendar Foundation CoreFoundation
+NSIslamicCivilCalendar Foundation CoreFoundation
+NSJapaneseCalendar Foundation CoreFoundation
+NSPersianCalendar Foundation CoreFoundation
+NSRepublicOfChinaCalendar Foundation CoreFoundation
 NSHTTPCookieComment Foundation CFNetwork
 NSHTTPCookieCommentURL Foundation CFNetwork
 NSHTTPCookieDiscard Foundation CFNetwork
@@ -72,8 +82,8 @@ kCFStreamSocketSecurityLevelTLSv1 CFNetwork CoreFoundation
 EOF
 
 expected_count=$(wc -l < "$work/expected" | tr -d ' ')
-if [ "$expected_count" -ne 60 ]; then
-    echo "Framework ownership manifest changed: expected 60 moves, got $expected_count" >&2
+if [ "$expected_count" -ne 70 ]; then
+    echo "Framework ownership manifest changed: expected 70 moves, got $expected_count" >&2
     exit 1
 fi
 

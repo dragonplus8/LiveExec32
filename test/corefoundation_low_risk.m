@@ -1,5 +1,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <Foundation/Foundation.h>
+#include <stdio.h>
+#include <string.h>
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -7,9 +9,30 @@ static int Check(Boolean condition, int failure) {
     return condition ? 0 : failure;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     @autoreleasepool {
         int failed = 0;
+
+        NSString * const calendarIdentifiers[] = {
+            NSGregorianCalendar, NSBuddhistCalendar, NSChineseCalendar,
+            NSHebrewCalendar, NSISO8601Calendar, NSIndianCalendar,
+            NSIslamicCalendar, NSIslamicCivilCalendar, NSJapaneseCalendar,
+            NSPersianCalendar, NSRepublicOfChinaCalendar,
+        };
+        NSString * const expectedCalendarIdentifiers[] = {
+            @"gregorian", @"buddhist", @"chinese", @"hebrew", @"iso8601",
+            @"indian", @"islamic", @"islamic-civil", @"japanese", @"persian", @"roc",
+        };
+        for(size_t index = 0; index < sizeof(calendarIdentifiers) /
+                sizeof(calendarIdentifiers[0]); ++index) {
+            failed |= Check([calendarIdentifiers[index] isEqualToString:
+                expectedCalendarIdentifiers[index]], 16777216);
+        }
+        printf("corefoundation-calendar-constants: %s (11 identifiers)\n",
+            failed ? "FAIL" : "PASS");
+        fflush(stdout);
+        if(argc > 1 && strcmp(argv[1], "--calendar-only") == 0)
+            return failed != 0;
 
         CFURLRef home = CFCopyHomeDirectoryURL();
         failed |= Check(home && CFURLHasDirectoryPath(home), 1);

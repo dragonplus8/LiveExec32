@@ -137,6 +137,11 @@ CoreText_LDFLAGS = \
   -compatibility_version 359.4.0 \
   -current_version 359.4.0
 
+CoreVideo_FRAMEWORKS = LC32 CoreFoundation
+CoreVideo_LDFLAGS = \
+  -compatibility_version 1.2.0 \
+  -current_version 1.5.0
+
 OpenGLES_FRAMEWORKS = LC32
 OpenGLES_LDFLAGS = \
   -compatibility_version 1.0.0 \
@@ -219,7 +224,7 @@ endif
 
 # Preserve Theos's before/internal/after ordering at the top level while the
 # framework prerequisites of internal-all run concurrently.  Every guest
-# framework links LC32, and the two re-export relationships below consume
+# framework links LC32, and the additional guest-framework links below consume
 # binaries produced by this same build, so encode those ordering constraints.
 ifeq ($(THEOS_CURRENT_INSTANCE),)
 .NOTPARALLEL: all clean clean-packages stage package install uninstall do commands
@@ -231,6 +236,8 @@ Foundation.all.framework.variables: | \
   CoreFoundation.all.framework.variables CFNetwork.all.framework.variables
 AVFoundation: | AVFAudio
 AVFoundation.all.framework.variables: | AVFAudio.all.framework.variables
+CoreVideo: | CoreFoundation
+CoreVideo.all.framework.variables: | CoreFoundation.all.framework.variables
 endif
 
 # Exclude linking against CoreFoundation and Foundation for themselves

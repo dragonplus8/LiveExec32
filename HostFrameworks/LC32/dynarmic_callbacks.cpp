@@ -1831,9 +1831,9 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
                     false);
                 break;
             case SYS_psynch_cvwait: {
-                /* The ARMv7 syscall veneer saves r4-r6/r8.  Relative
-                 * timeout seconds and nanoseconds are therefore at the
-                 * original arguments' stack slots, sp+32 and sp+40. */
+                /* The ARMv7 veneer saves r4-r6/r8, then loads the mutex and
+                 * both mugen words into r4-r6. Flags stay at sp+28, followed
+                 * by relative timeout seconds at sp+32 and nsec at sp+40. */
                 const u32 stack = cpu->Regs()[Reg::SP];
                 const u64 timeoutSecondsBits =
                     static_cast<u64>(MemoryRead32(
@@ -1843,6 +1843,8 @@ BE CAREFUL WHEN MOVING SYSCALL. Checklist:
                 cpu->Regs()[0] = GuestPsynchConditionWait(
                     cpu->Regs()[0], cpu->Regs()[1],
                     cpu->Regs()[2], cpu->Regs()[4],
+                    cpu->Regs()[5], cpu->Regs()[6],
+                    MemoryRead32(stack + 28, false),
                     static_cast<int64_t>(timeoutSecondsBits),
                     MemoryRead32(stack + 40, false));
                 break;

@@ -114,11 +114,13 @@ $(eval $(call lc32_test,lc32-kqueue-kevent,kqueue_kevent.c,))
 $(eval $(call lc32_test,lc32-lseek-abi,lseek_abi.c,))
 $(eval $(call lc32_test,lc32-mremap-encrypted,mremap_encrypted.c,))
 $(eval $(call lc32_test,lc32-native-pthread-smoke,native_pthread_smoke.c,))
+$(eval $(call lc32_test,lc32-psynch-cvwait-handoff,psynch_cvwait_handoff.c,))
 $(eval $(call lc32_test,lc32-recvfrom-abi,recvfrom_abi.c,))
 $(eval $(call lc32_test,lc32-setsockopt-abi,setsockopt_abi.c,))
 $(eval $(call lc32_test,lc32-socket-accept-abi,socket_accept_abi.c,))
 $(eval $(call lc32_test,lc32-statfs-abi,statfs_abi.c,))
 $(eval $(call lc32_test,lc32-sysctl-size-query,sysctl_size_query.c,))
+$(eval $(call lc32_test,lc32-thread-suspend,thread_suspend.c,))
 $(eval $(call lc32_test,lc32-vm-allocate-collision,vm_allocate_collision.c,))
 $(eval $(call lc32_test,lc32-vm-copy,vm_copy.c,))
 $(eval $(call lc32_test,lc32-vm-read-overwrite,vm_copy.c,))
@@ -138,6 +140,7 @@ $(eval $(call lc32_guest_test,lc32-audio-unit-spatial-mixer,audio_unit_spatial_m
 
 # Foundation, CoreFoundation, and bridge behavior.
 $(eval $(call lc32_guest_test,lc32-addressbook-compat,addressbook_compat.m,AddressBook Foundation CoreFoundation))
+$(eval $(call lc32_guest_test,lc32-nsuuid-bytes,nsuuid_bytes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-arc-proxy-lifetime,arc_proxy_lifetime.m arc_proxy_lifetime_support.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-block-bridge,block_bridge.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-cfarray-callbacks,cfarray_callbacks.m,Foundation CoreFoundation LC32))
@@ -169,6 +172,7 @@ $(eval $(call lc32_guest_test,lc32-corefoundation-url-common,corefoundation_url_
 $(eval $(call lc32_guest_test,lc32-corefoundation-uuid,corefoundation_uuid.c,Foundation CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-corefoundation-write-stream,corefoundation_write_stream.m,Foundation CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-coremedia-time-values,coremedia_time_values.c,CoreMedia CoreFoundation Foundation))
+$(eval $(call lc32_guest_test,lc32-corevideo-buffers,corevideo_buffers.m,CoreVideo CoreFoundation Foundation OpenGLES))
 $(eval $(call lc32_guest_test,lc32-coredata-merge-policy,coredata_merge_policy.m,CoreData Foundation CoreFoundation LC32))
 $(eval $(call lc32_guest_test,lc32-cxx-lifecycle,cxx_lifecycle.mm,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-data-bytes,data_bytes.m,Foundation))
@@ -194,6 +198,7 @@ $(eval $(call lc32_guest_test,lc32-string-get-bytes,string_get_bytes.m,Foundatio
 $(eval $(call lc32_guest_test,lc32-string-range,string_range.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-thread-modes,thread_modes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-thread-perform,thread_perform.m,Foundation))
+$(eval $(call lc32_guest_test,lc32-thread-suspend-hostcall,thread_suspend_hostcall.m,Foundation))
 
 # Graphics and text.
 $(eval $(call lc32_guest_test,lc32-coregraphics-bitmap,coregraphics_bitmap.c,CoreGraphics CoreFoundation LC32))
@@ -217,6 +222,8 @@ $(eval $(call lc32_guest_test,lc32-uikit-nib-awakening,uikit_nib_awakening.m,Fou
 $(eval $(call lc32_guest_test,lc32-uikit-image-context,uikit_image_context.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-device,uikit_legacy_device.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-overlay,uikit_legacy_overlay.m,Foundation UIKit QuartzCore CoreGraphics LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-legacy-root-geometry,uikit_legacy_root_geometry.m,Foundation UIKit QuartzCore CoreGraphics LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-orientation-startup,uikit_orientation_startup.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-string-sizing,uikit_legacy_string_sizing.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-window-root,uikit_legacy_window_root.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-view-load-reentrancy,uikit_view_load_reentrancy.m,Foundation UIKit CoreGraphics LC32))
@@ -235,6 +242,7 @@ ownership_publication_race.m_CFLAGS := -fno-objc-arc
 
 lc32-block-bridge_CFLAGS := -fblocks
 lc32-thread-modes_CFLAGS := -fblocks
+lc32-thread-suspend-hostcall_CFLAGS := -fno-objc-arc
 lc32-thread-perform_CFLAGS := -fblocks
 
 lc32-corefoundation-attributed-string_CFLAGS := -fno-objc-arc
@@ -259,6 +267,12 @@ lc32-uikit-legacy-window-root_CFLAGS := -fno-objc-arc -Wall -Wextra -Werror
 # standalone -miphoneos-version-min flag and advertises SDK 10.3.
 lc32-uikit-legacy-overlay_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
 lc32-uikit-legacy-overlay_LDFLAGS += -target armv7s-apple-ios7.0
+lc32-uikit-legacy-root-geometry_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
+lc32-uikit-legacy-root-geometry_LDFLAGS += -target armv7s-apple-ios7.0
+lc32-uikit-orientation-startup_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
+lc32-uikit-orientation-startup_LDFLAGS += -target armv7s-apple-ios7.0
+# Per-source flags follow Theos' DEBUG_CFLAGS, which otherwise restore -O0.
+uikit_orientation_startup.m_CFLAGS := -O2
 
 lc32-cxx-lifecycle_CCFLAGS := -std=c++14
 
@@ -295,8 +309,8 @@ ABI_TESTS := \
   lc32-vm-allocate-collision lc32-vm-copy
 AUDIO_TESTS := $(filter lc32-audio-%,$(TOOL_NAME))
 COREFOUNDATION_TESTS := $(filter lc32-corefoundation-%,$(TOOL_NAME))
-GRAPHICS_TESTS := $(filter lc32-coregraphics-% lc32-quartzcore-% lc32-coretext-% lc32-openal-% lc32-opengles-%,$(TOOL_NAME))
-THREADING_TESTS := lc32-native-pthread-smoke lc32-ownership-publication-race lc32-thread-modes lc32-thread-perform
+GRAPHICS_TESTS := $(filter lc32-coregraphics-% lc32-quartzcore-% lc32-coretext-% lc32-corevideo-% lc32-openal-% lc32-opengles-%,$(TOOL_NAME))
+THREADING_TESTS := lc32-native-pthread-smoke lc32-ownership-publication-race lc32-thread-modes lc32-thread-perform lc32-thread-suspend lc32-thread-suspend-hostcall
 UIKIT_TESTS := $(filter lc32-uikit-%,$(TOOL_NAME)) lc32-guest-fp-return lc32-guest-host-aggregate-arguments lc32-scalar-pointer-bridge lc32-text-input-traits
 
 include $(THEOS_MAKE_PATH)/tool.mk
@@ -337,6 +351,11 @@ after-$(THEOS_CURRENT_INSTANCE)-all::
 	LC32_GUEST_SDK="$(ISYSROOT)" ./coremedia_time_value_symbols.sh \
 		"$(GUEST_FRAMEWORK_DIR)/CoreMedia.framework/CoreMedia"
 endif
+ifeq ($(THEOS_CURRENT_INSTANCE),lc32-corevideo-buffers)
+after-$(THEOS_CURRENT_INSTANCE)-all::
+	sh ./corevideo_symbols.sh \
+		"$(GUEST_FRAMEWORK_DIR)/CoreVideo.framework/CoreVideo"
+endif
 else
 
 SHORT_TESTS := $(patsubst lc32-%,%,$(TOOL_NAME))
@@ -355,7 +374,7 @@ SHORT_TESTS := $(patsubst lc32-%,%,$(TOOL_NAME))
   check-foundation-runtime-symbols \
   check-corefoundation-low-risk-symbols corefoundation-low-risk-framework \
   foundation-runtime-framework coremedia-time-values-framework \
-  check-coremedia-time-values check-messenger $(SHORT_TESTS)
+  check-coremedia-time-values check-corevideo check-messenger $(SHORT_TESTS)
 
 # Theos' per-instance convenience targets bypass the top-level `all` target,
 # which normally creates the Clang module validation stamp first.
@@ -392,7 +411,7 @@ SYMBOL_TESTS := lc32-openal-smoke lc32-opengles-smoke \
   lc32-coregraphics-bitmap lc32-quartzcore-transform \
   lc32-uikit-accessibility lc32-mobilecoreservices-uti lc32-cfnetwork-http \
   lc32-foundation-zone lc32-corefoundation-low-risk \
-  lc32-coremedia-time-values lc32-gamecontroller-snapshot
+  lc32-coremedia-time-values lc32-corevideo-buffers lc32-gamecontroller-snapshot
 $(SYMBOL_TESTS): frameworks
 
 check-openal: lc32-openal-smoke
@@ -401,6 +420,7 @@ check-security: lc32-security-secitem
 coremedia-time-values-framework: frameworks
 lc32-coremedia-time-values: coremedia-time-values-framework
 check-coremedia-time-values: lc32-coremedia-time-values
+check-corevideo: lc32-corevideo-buffers
 check-coretext: lc32-coretext-font-descriptor
 	./coretext_font_descriptor_symbols.sh \
 		"$(GUEST_FRAMEWORK_DIR)/CoreText.framework/CoreText"
@@ -463,7 +483,7 @@ check-symbols: frameworks check-openal check-opengles check-security check-coret
 	check-framework-symbol-ownership \
 	check-foundation-public-symbols \
 	check-foundation-runtime-symbols \
-	check-corefoundation-low-risk-symbols check-coremedia-time-values
+	check-corefoundation-low-risk-symbols check-coremedia-time-values check-corevideo
 
 check-messenger:
 	@test -n "$(MESSENGER)" || { \

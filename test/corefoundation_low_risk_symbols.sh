@@ -13,6 +13,16 @@ trap 'rm -rf "$work"' EXIT HUP INT TERM
 cat > "$work/expected" <<'EOF'
 NSDefaultRunLoopMode
 NSGregorianCalendar
+NSBuddhistCalendar
+NSChineseCalendar
+NSHebrewCalendar
+NSISO8601Calendar
+NSIndianCalendar
+NSIslamicCalendar
+NSIslamicCivilCalendar
+NSJapaneseCalendar
+NSPersianCalendar
+NSRepublicOfChinaCalendar
 NSLocaleCurrencySymbol
 NSLocaleIdentifier
 NSStreamDataWrittenToMemoryStreamKey
@@ -210,8 +220,8 @@ if [ -s "$work/missing" ]; then
 fi
 
 expected_count=$(wc -l < "$work/expected" | tr -d ' ')
-if [ "$expected_count" -ne 171 ]; then
-    echo "CoreFoundation shortlist baseline changed: expected 171, got $expected_count" >&2
+if [ "$expected_count" -ne 181 ]; then
+    echo "CoreFoundation shortlist baseline changed: expected 181, got $expected_count" >&2
     exit 1
 fi
 

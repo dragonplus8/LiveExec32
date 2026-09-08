@@ -3588,6 +3588,12 @@ static u32 LC32CachedGuestSelector(std::atomic<u32> &cache,
     return value;
 }
 
+static thread_local u32 LC32GuestCallbackNesting = 0;
+
+u32 LC32GuestCallbackDepth(void) {
+    return LC32GuestCallbackNesting;
+}
+
 u64 LC32InvokeGuestC(u32 pc, bool ret64, int argc, u32 *args) {
     if(threadHandle.jit == nullptr || threadHandle.cb == nullptr) {
         fprintf(stderr,
@@ -3595,6 +3601,10 @@ u64 LC32InvokeGuestC(u32 pc, bool ret64, int argc, u32 *args) {
             "(pc=0x%x)\n", pc);
         return 0;
     }
+    struct CallbackScope {
+        CallbackScope() { ++LC32GuestCallbackNesting; }
+        ~CallbackScope() { --LC32GuestCallbackNesting; }
+    } callbackScope;
     std::array<std::uint32_t, 16> &regs = threadHandle.jit->Regs();
     struct context32 ctx;
     Dynarmic_context_1save(&ctx);

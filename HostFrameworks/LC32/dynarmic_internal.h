@@ -355,6 +355,7 @@ kern_return_t CopyGuestThreadState(
     mach_port_t target, thread_state_flavor_t flavor,
     mach_msg_type_number_t capacity, u32 *state,
     mach_msg_type_number_t *count);
+kern_return_t ChangeGuestThreadSuspendCount(mach_port_t target, bool suspend);
 kern_return_t CopyGuestThreadInfo(
     mach_port_t target, thread_flavor_t flavor,
     mach_msg_type_number_t capacity, integer_t *info,
@@ -644,7 +645,8 @@ u32 GuestPsynchMutexDrop(
     u32 mutex, u32 mgen, u32 ugen, u32 flags);
 u32 GuestPsynchConditionWait(
     u32 condition, u32 conditionSequence,
-    u32 conditionSSequence, u32 mutex,
+    u32 conditionSSequence, u32 mutex, u32 mutexMgen,
+    u32 mutexUgen, u32 flags,
     int64_t timeoutSeconds, u32 timeoutNanoseconds);
 u32 GuestPsynchConditionSignal(
     u32 condition, u32 conditionSequence,
@@ -725,6 +727,9 @@ struct NativeThreadStateSlot {
     context32 snapshot = {};
     bool snapshotValid = false;
     bool ownerExited = false;
+    // Mutations hold mutex; atomic reads avoid it on normal host-call entry.
+    std::atomic<uint32_t> suspendCount{0};
+    bool suspendAcknowledged = false;
     size_t hostCallDepth = 0;
     size_t hostCallQuiescenceDepth = 0;
     size_t guestCallbackDepth = 0;
