@@ -143,7 +143,7 @@ static void LC32CancelDelayedPerforms(
             .slotCount = LC32FoundationRecordLastSelectorSlotCount,
         };
         call.slots[LC32FoundationRecordLastSelectorTargetSlot] =
-            ((id)_target).host_self;
+    [(NSObject *)_target host_self];
         call.slots[LC32FoundationRecordLastSelectorSelectorSlot] =
             LC32GetHostSelector(_selector);
         LC32InvokeHostCRet32(LC32RecordLastSelectorHostFunction,
