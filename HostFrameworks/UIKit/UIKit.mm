@@ -2865,12 +2865,34 @@ extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
             (IMP)&LC32LegacyPreferredInterfaceOrientation);
     }
 
-    /* UIStatusBarHidden and pre-iOS-7 UIApplication status-bar calls are no
+     /* UIStatusBarHidden and pre-iOS-7 UIApplication status-bar calls are no
      * longer consulted by modern UIKit. A guest implementation of the modern
      * method wins because class_addMethod leaves an existing method intact. */
     addNativeAdapter(@selector(prefersStatusBarHidden),
         (IMP)&LC32LegacyPrefersStatusBarHidden);
 
+    /* Unity's own generated UnityDefaultViewController crashes reading a
+     * null internal pointer the first time real UIKit asks it for
+     * -supportedInterfaceOrientations during initial window presentation --
+     * it reads Unity engine orientation state that isn't populated yet at
+     * that point in Unity's own native bootstrap, not anything specific to
+     * this game. Unlike the legacy-rotation adapters above, the guest class
+     * already defines this selector itself, so class_addMethod would
+     * refuse to touch it; class_replaceMethod is needed to actually take
+     * over the crashing implementation. Only the one class name we have
+     * direct crash evidence for is touched, not Unity classes in general,
+     * since other Unity view controllers may implement this safely. */
+    if(strcmp(class_getName(cls), "UnityDefaultViewController") == 0) {
+        Method declaration = class_getInstanceMethod(
+            UIViewController.class,
+            @selector(supportedInterfaceOrientations));
+        if(declaration) {
+            class_replaceMethod(cls,
+                @selector(supportedInterfaceOrientations),
+                (IMP)&LC32SafeDeclaredInterfaceOrientations,
+                method_getTypeEncoding(declaration));
+        }
+    }
 }
 
 /* SVC 1002 forwards the first guest argument in r2, followed by r3 and the
