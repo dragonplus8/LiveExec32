@@ -671,6 +671,20 @@ UIInterfaceOrientationMask LC32SafeDeclaredInterfaceOrientations(
                   : LC32GuestInterfacePolicy().declaredOrientations;
 }
 
+/* Same idea as LC32SafeDeclaredInterfaceOrientations above, but for the
+ * legacy UIApplicationDelegate hook rather than the per-view-controller
+ * one -- see the BFAppController installation site in
+ * LC32UIKitPrepareGuestClass for why this one is needed too. There is no
+ * per-window override to look up here (unlike the per-controller case,
+ * this hook does not have a natural per-controller association to key
+ * off), so it just falls back to the same application-wide declared
+ * policy. */
+UIInterfaceOrientationMask
+        LC32SafeApplicationSupportedInterfaceOrientationsForWindow(
+        id, SEL, UIApplication *, UIWindow *) {
+    return LC32GuestInterfacePolicy().declaredOrientations;
+}
+
 void LC32ScaleLegacyIPadWindow(UIWindow *window);
 CGRect LC32WindowSceneBounds(UIWindow *window);
 bool LC32UsesClassicFullScreenViewport(UIWindow *window);
@@ -2800,7 +2814,31 @@ extern "C" bool LC32UIKitGetViewDuringGuestLoad(
 @end
 
 extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
-    if(!cls || !LC32ClassIsUIViewController(cls)) return;
+    if(!cls) return;
+
+    /* Backflip's own UIApplicationDelegate, not a UIViewController, so this
+     * has to run before the view-controller guard below returns early.
+     * Real UIKit calls this legacy per-application orientation hook
+     * directly via objc_msgSend on the delegate, the same way it calls
+     * -supportedInterfaceOrientations directly on a root view controller --
+     * see the UnityDefaultViewController fix further down for that sibling
+     * case. BFAppController's own implementation reads state that isn't
+     * populated yet this early in startup and crashes reading unmapped
+     * guest memory; the crash report's last-guest-selector points straight
+     * at this method. Only this one class name is touched. */
+    if(strcmp(class_getName(cls), "BFAppController") == 0) {
+        SEL selector = @selector(
+            application:supportedInterfaceOrientationsForWindow:);
+        Method declaration = class_getInstanceMethod(cls, selector);
+        if(declaration) {
+            class_replaceMethod(cls, selector,
+                (IMP)
+                    &LC32SafeApplicationSupportedInterfaceOrientationsForWindow,
+                method_getTypeEncoding(declaration));
+        }
+    }
+
+    if(!LC32ClassIsUIViewController(cls)) return;
 
     /* Preserve native and inherited -loadView implementations. A synthesized
      * class's own void trampoline is the only method which needs the legacy
