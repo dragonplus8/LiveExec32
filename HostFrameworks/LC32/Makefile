@@ -8,7 +8,7 @@ STRIP = 0
 OPTFLAG = -O2
 # Verbose bridge, loader, memory, and syscall traces are opt-in, independent
 # of optimization or debug symbols. Errors remain enabled in every build.
-LC32_DEBUG_LOGS ?= 0
+LC32_DEBUG_LOGS ?= 1
 # The root app signs the embedded copy after its optional Catalyst rewrite.
 TARGET_CODESIGN =
 
