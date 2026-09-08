@@ -372,6 +372,11 @@ static bool LC32BlockArgumentTraceIsEnabled;
  * string rather than garbage. */
 char LC32LastGuestSelectorDescription[256] = {0};
 
+/* Storage for the extern declared in dynarmic.h. Zero-initialized so a
+ * crash before any guest selector has ever been invoked reports an empty
+ * string rather than garbage. */
+char LC32LastGuestSelectorDescription[256] = {0};
+
 static void LC32InitializeNetworkTrace() {
     const char *value = getenv("LC32_NETWORK_TRACE");
     LC32NetworkTraceIsEnabled =
@@ -4388,6 +4393,11 @@ static u64 LC32InvokeGuestSelectorRaw(id self, SEL _cmd,
                                      va_list *hostStackArguments,
                                      Method *resolvedMethod) {
     LC32TraceGuestMethodCallback(self, _cmd);
+    snprintf(LC32LastGuestSelectorDescription,
+        sizeof(LC32LastGuestSelectorDescription), "%c[%s %s]",
+        self && object_isClass(self) ? '+' : '-',
+        self ? class_getName(object_getClass(self)) : "(null)",
+        _cmd ? sel_getName(_cmd) : "(null)");
     snprintf(LC32LastGuestSelectorDescription,
         sizeof(LC32LastGuestSelectorDescription), "%c[%s %s]",
         self && object_isClass(self) ? '+' : '-',
