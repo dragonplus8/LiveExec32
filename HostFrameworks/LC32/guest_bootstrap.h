@@ -15,10 +15,25 @@ inline constexpr std::size_t InitialStackGap = 0x1000;
 // LiveContainer's HOME is the selected guest data container, while its
 // Foundation home can still identify the outer container. Return an owning
 // snapshot before launcher setenv calls can invalidate environment pointers.
+// Simulator launches may resolve an explicitly shortened container symlink;
+// leave device path spellings unchanged by default, including jailbreak paths.
 std::string SelectConfiguredHomeDirectory(
     const char *explicitGuestHome,
     const char *liveContainerHome,
-    const char *processHome);
+    const char *processHome,
+    bool resolveSymlinks = false);
+
+inline constexpr char LegacyBundleAliasName[] = "LiveExec32.app";
+
+// Pre-iOS-8 apps may discover their bundle by enumerating HOME for an .app
+// child. Restore that layout only for a configured app container, never the
+// CLI runner's fallback home. The reserved alias is deliberately short for
+// old path buffers. Existing entries are never replaced. Returns zero for
+// success/not applicable, or an errno value for a filesystem failure/conflict.
+int EnsureLegacyBundleLayout(
+    const std::string &configuredHome,
+    const std::string &executablePath,
+    std::uint32_t sdkVersion);
 
 struct EnvironmentSelection {
     std::map<std::string, std::string> values;

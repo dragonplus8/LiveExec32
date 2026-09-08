@@ -1,7 +1,13 @@
 #include "guest_bootstrap.h"
 
 #include <cctype>
+#include <cerrno>
+#include <cstdlib>
+#include <fcntl.h>
 #include <limits>
+#include <limits.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <utility>
 
 namespace LC32GuestBootstrap {
@@ -28,19 +34,109 @@ bool AddSize(std::size_t left, std::size_t right, std::size_t *result) {
     return true;
 }
 
+struct DirectoryDescriptor {
+    int value;
+    ~DirectoryDescriptor() {
+        if(value >= 0) close(value);
+    }
+};
+
 } // anonymous namespace
 
 std::string SelectConfiguredHomeDirectory(
         const char *explicitGuestHome,
         const char *liveContainerHome,
-        const char *processHome) {
+        const char *processHome,
+        bool resolveSymlinks) {
+    std::string selected;
     if(explicitGuestHome && explicitGuestHome[0] == '/') {
-        return explicitGuestHome;
+        selected = explicitGuestHome;
+    } else if(liveContainerHome && processHome && processHome[0] == '/') {
+        selected = processHome;
     }
-    if(liveContainerHome && processHome && processHome[0] == '/') {
-        return processHome;
+    if(resolveSymlinks && !selected.empty()) {
+        char resolved[PATH_MAX];
+        if(realpath(selected.c_str(), resolved)) return resolved;
     }
-    return {};
+    return selected;
+}
+
+int EnsureLegacyBundleLayout(
+        const std::string &configuredHome,
+        const std::string &executablePath,
+        std::uint32_t sdkVersion) {
+    if(sdkVersion >= 0x00080000 || configuredHome.empty() ||
+            configuredHome.front() != '/' || configuredHome == "/" ||
+            executablePath.empty() || executablePath.front() != '/') {
+        return 0;
+    }
+
+    const std::size_t slash = executablePath.find_last_of('/');
+    const std::string bundlePath = executablePath.substr(0, slash);
+    const std::string executableName = executablePath.substr(slash + 1);
+    if(bundlePath.size() <= 4 ||
+            bundlePath.compare(bundlePath.size() - 4, 4, ".app") != 0 ||
+            executableName.empty() || executableName == "." ||
+            executableName == "..") {
+        return 0;
+    }
+
+    char resolvedBundle[PATH_MAX];
+    if(!realpath(bundlePath.c_str(), resolvedBundle)) return errno;
+    DirectoryDescriptor bundle{
+        open(resolvedBundle, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
+    if(bundle.value < 0) return errno;
+
+    struct stat metadata = {};
+    if(fstatat(bundle.value, "Info.plist", &metadata,
+            AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(metadata.st_mode)) {
+        return 0;
+    }
+    if(fstatat(bundle.value, executableName.c_str(), &metadata,
+            AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(metadata.st_mode)) {
+        return 0;
+    }
+
+    DirectoryDescriptor home{
+        open(configuredHome.c_str(),
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
+    if(home.value < 0) return errno;
+
+    // The real pre-iOS-8 layout already has its bundle in HOME. Do not add a
+    // second .app entry in that case, including when HOME has a path alias.
+    struct stat homeMetadata = {};
+    struct stat parentMetadata = {};
+    if(fstat(home.value, &homeMetadata) != 0) return errno;
+    if(fstatat(bundle.value, "..", &parentMetadata, 0) != 0) return errno;
+    if(homeMetadata.st_dev == parentMetadata.st_dev &&
+            homeMetadata.st_ino == parentMetadata.st_ino) {
+        return 0;
+    }
+
+    struct stat bundleMetadata = {};
+    if(fstat(bundle.value, &bundleMetadata) != 0) return errno;
+    auto checkExistingAlias = [&]() {
+        struct stat entry = {};
+        if(fstatat(home.value, LegacyBundleAliasName, &entry,
+                AT_SYMLINK_NOFOLLOW) != 0) {
+            return errno;
+        }
+        if(!S_ISLNK(entry.st_mode)) return EEXIST;
+        if(fstatat(home.value, LegacyBundleAliasName, &entry, 0) == 0 &&
+                entry.st_dev == bundleMetadata.st_dev &&
+                entry.st_ino == bundleMetadata.st_ino) {
+            return 0;
+        }
+        return EEXIST;
+    };
+
+    const int existingError = checkExistingAlias();
+    if(existingError != ENOENT) return existingError;
+    if(symlinkat(resolvedBundle, home.value, LegacyBundleAliasName) == 0) {
+        return 0;
+    }
+    // Another launch may have created the same alias after our lookup.
+    return errno == EEXIST ? checkExistingAlias() : errno;
 }
 
 EnvironmentSelection CollectEnvironment(char *const environment[]) {

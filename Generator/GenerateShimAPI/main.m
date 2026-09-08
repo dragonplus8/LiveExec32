@@ -38,9 +38,10 @@ static BOOL LC32EncodingIsOpaqueCFObjectPointer(const char *encoding) {
     encoding = LC32UnqualifiedEncoding(encoding);
     if(!encoding || encoding[0] != '^' || encoding[1] != '{') return NO;
 
-    /* CoreGraphics exposes this Objective-C-compatible CF object as
-     * CGColorRef, but its runtime encoding only preserves `CGColor *`. */
-    if(LC32EncodingRepresentsCGColorRef(encoding)) return YES;
+    /* Runtime encodings lose these exact Objective-C-compatible CF typedefs.
+     * Do not extend this to arbitrary CG-prefixed private structures. */
+    if(LC32EncodingRepresentsCGColorRef(encoding) ||
+       LC32EncodingRepresentsCGImageRef(encoding)) return YES;
 
     const char *name = encoding + 2;
     static const char *const prefixes[] = {
@@ -95,6 +96,7 @@ static LC32KnownStruct LC32KnownStructForEncoding(const char *encoding) {
 + (NSString *)readableTypeForSignature:(const char *)signature {
     if(!signature || !*signature) return @"?";
     if(LC32EncodingRepresentsCGColorRef(signature)) return @"CGColorRef";
+    if(LC32EncodingRepresentsCGImageRef(signature)) return @"CGImageRef";
     if(LC32EncodingIsOpaqueCFObjectPointer(signature)) {
         /* Runtime qualifiers can precede the pointer encoding (for example
          * r^{__CF...}).  Generated code only needs an address-sized token;
@@ -955,7 +957,9 @@ static BOOL LC32MethodHasManualAdapter(NSString *className,
     }
     if([className isEqualToString:@"UIImage"] &&
        !method.isInstanceMethod &&
-       [selector isEqualToString:@"imageNamed:"]) {
+       ([selector isEqualToString:@"imageNamed:"] ||
+        [selector isEqualToString:@"imageWithCGImage:"] ||
+        [selector isEqualToString:@"imageWithCGImage:scale:orientation:"])) {
         return YES;
     }
     /* Modern UIApplication accepts these deprecated selectors but no longer

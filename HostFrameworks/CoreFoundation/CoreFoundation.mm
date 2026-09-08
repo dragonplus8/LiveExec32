@@ -215,7 +215,7 @@ const void *DictionaryOperand(
     return SlotHostObject<const void *>(call, valueIndex);
 }
 
-u32 GuestDictionaryOperand(
+u32 GuestCollectionOperand(
         const void *value, uint32_t mode) {
     if(!value || !DictionaryCallbacksModeIsValid(mode)) return 0;
     if(mode == LC32CoreFoundationCallbacksNull) {
@@ -1160,6 +1160,67 @@ u32 LC32_CoreFoundation_Dispatch(u32 opcodeValue, u32 guestCall, u32) {
             return GuestForCreatedObject(CFArrayCreateMutable(
                 kCFAllocatorDefault, static_cast<CFIndex>(SlotU32(call, 0)),
                 callbacks));
+        }
+        case LC32CoreFoundationOpArrayCreateCopy: {
+            if(!RequireSlots(call, 1)) return 0;
+            CFArrayRef array = SlotHostObject<CFArrayRef>(call, 0);
+            return array ? GuestForCreatedObject(CFArrayCreateCopy(
+                kCFAllocatorDefault, array)) : 0;
+        }
+        case LC32CoreFoundationOpArrayCreateMutableCopy: {
+            if(!RequireSlots(call, 2) || SlotU32(call, 1) > INT32_MAX)
+                return 0;
+            CFArrayRef array = SlotHostObject<CFArrayRef>(call, 0);
+            return array ? GuestForCreatedObject(CFArrayCreateMutableCopy(
+                kCFAllocatorDefault, SlotU32(call, 1), array)) : 0;
+        }
+        case LC32CoreFoundationOpArrayAppendValue: {
+            if(!RequireSlots(call, 2)) return 0;
+            CFMutableArrayRef array =
+                SlotHostObject<CFMutableArrayRef>(call, 0);
+            if(array) CFArrayAppendValue(array,
+                SlotHostObject<const void *>(call, 1));
+            return 0;
+        }
+        case LC32CoreFoundationOpArrayInsertValueAtIndex:
+        case LC32CoreFoundationOpArraySetValueAtIndex: {
+            if(!RequireSlots(call, 3) || SlotU32(call, 1) > INT32_MAX)
+                return 0;
+            CFMutableArrayRef array =
+                SlotHostObject<CFMutableArrayRef>(call, 0);
+            const CFIndex index = SlotU32(call, 1);
+            if(!array || index > CFArrayGetCount(array)) return 0;
+            const void *value = SlotHostObject<const void *>(call, 2);
+            if(opcodeValue == LC32CoreFoundationOpArrayInsertValueAtIndex)
+                CFArrayInsertValueAtIndex(array, index, value);
+            else
+                CFArraySetValueAtIndex(array, index, value);
+            return 0;
+        }
+        case LC32CoreFoundationOpArrayGetValueAtIndex: {
+            if(!RequireSlots(call, 3) || SlotU32(call, 1) > INT32_MAX ||
+               ArrayCallbacks(SlotU32(call, 2)) ==
+                    reinterpret_cast<const CFArrayCallBacks *>(UINTPTR_MAX))
+                return 0;
+            CFArrayRef array = SlotHostObject<CFArrayRef>(call, 0);
+            const CFIndex index = SlotU32(call, 1);
+            if(!array || index >= CFArrayGetCount(array)) return 0;
+            const void *value = CFArrayGetValueAtIndex(array, index);
+            /* NULL callbacks preserve opaque guest addresses verbatim. They
+             * are neither native objects nor addresses to be dereferenced. */
+            return GuestCollectionOperand(value, SlotU32(call, 2));
+        }
+        case LC32CoreFoundationOpArrayExchangeValuesAtIndices: {
+            if(!RequireSlots(call, 3) || SlotU32(call, 1) > INT32_MAX ||
+               SlotU32(call, 2) > INT32_MAX) return 0;
+            CFMutableArrayRef array =
+                SlotHostObject<CFMutableArrayRef>(call, 0);
+            if(!array) return 0;
+            const CFIndex count = CFArrayGetCount(array);
+            if(SlotU32(call, 1) < count && SlotU32(call, 2) < count)
+                CFArrayExchangeValuesAtIndices(array,
+                    SlotU32(call, 1), SlotU32(call, 2));
+            return 0;
         }
         case LC32CoreFoundationOpDictionaryCreateMutable: {
             if(!RequireSlots(call, 3) || SlotU32(call, 0) > INT32_MAX)
@@ -2817,7 +2878,7 @@ u32 LC32_CoreFoundation_Dispatch(u32 opcodeValue, u32 guestCall, u32) {
             const void *key = DictionaryOperand(call, 1, 2);
             if(!dictionary || !key) return 0;
             const void *value = CFDictionaryGetValue(dictionary, key);
-            return GuestDictionaryOperand(value, SlotU32(call, 3));
+            return GuestCollectionOperand(value, SlotU32(call, 3));
         }
         case LC32CoreFoundationOpDictionarySetValue: {
             if(!RequireSlots(call, 5)) return 0;
@@ -2886,7 +2947,7 @@ u32 LC32_CoreFoundation_Dispatch(u32 opcodeValue, u32 guestCall, u32) {
             if(guestKeys) {
                 for(CFIndex index = 0; index < count; ++index) {
                     guestObjects[index] =
-                        GuestDictionaryOperand(keys[index], keyMode);
+                        GuestCollectionOperand(keys[index], keyMode);
                     if(keys[index] && !guestObjects[index]) return 0;
                 }
                 if(byteCount && Dynarmic_mem_1write(guestKeys, byteCount,
@@ -2897,7 +2958,7 @@ u32 LC32_CoreFoundation_Dispatch(u32 opcodeValue, u32 guestCall, u32) {
             if(guestValues) {
                 for(CFIndex index = 0; index < count; ++index) {
                     guestObjects[index] =
-                        GuestDictionaryOperand(values[index], valueMode);
+                        GuestCollectionOperand(values[index], valueMode);
                     if(values[index] && !guestObjects[index]) return 0;
                 }
                 if(byteCount && Dynarmic_mem_1write(guestValues, byteCount,

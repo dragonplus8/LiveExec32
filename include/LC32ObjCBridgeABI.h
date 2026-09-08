@@ -77,6 +77,10 @@ typedef enum LC32HostMappingOperation {
      * ownership in the same host operation. This avoids exposing a raw host
      * address after its registry entry has been removed. */
     LC32HostMappingFinishGuestTeardownAndReleaseHost = 5,
+    /* Called by guest NSObject's root -dealloc, before its allocation can be
+     * reused. Detach a dead native peer's guest key but keep its host-address
+     * tombstone for deferred native lifetime-pin cleanup. */
+    LC32HostMappingGuestRootDealloc = 6,
 } LC32HostMappingOperation;
 
 typedef struct LC32HostObjectArrayDescriptor {

@@ -51,6 +51,18 @@
                 <string>v12@0:4^{CGColor=}8</string>
             </dict>
         </dict>
+        <key>LC32CGImageFixture</key>
+        <dict>
+            <key>-</key>
+            <dict>
+                <key>CGImage</key>
+                <string>r^{CGImage=}8@0:4</string>
+                <key>initWithCGImage:</key>
+                <string>@12@0:4^{CGImage=}8</string>
+                <key>initWithCGImage:scale:orientation:</key>
+                <string>@20@0:4^{CGImage=}8f12i16</string>
+            </dict>
+        </dict>
     </dict>
 </dict>
 </plist>

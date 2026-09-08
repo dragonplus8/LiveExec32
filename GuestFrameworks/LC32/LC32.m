@@ -15,6 +15,7 @@
 extern id _objc_rootAutorelease(id object);
 extern void _objc_rootRelease(id object);
 extern BOOL _objc_rootReleaseWasZero(id object);
+extern BOOL _objc_rootIsDeallocating(id object);
 extern id _objc_rootRetain(id object);
 extern uintptr_t _objc_rootRetainCount(id object);
 extern int32_t OSAtomicAdd32Barrier(
@@ -604,6 +605,15 @@ void *LC32GetAssociatedGuestBuffer(id object, uint32_t requiredCapacity) {
                     ptr = LC32RawExistingHostSelf(self);
                     if(ptr == LC32_HOST_MAPPING_DEAD) return 0;
                     if(!ptr) {
+                        /* Root -dealloc detaches a dead peer before guest
+                         * storage becomes reusable. The original runtime
+                         * still destroys C++ ivars and associations afterward;
+                         * their callbacks must not recreate a native peer for
+                         * this zero-count allocation. Existing owned teardown
+                         * mappings above remain callable on their owner thread.
+                         */
+                        if(!object_isClass(self) &&
+                                _objc_rootIsDeallocating(self)) return 0;
                         /*
                          * Retains performed while an object is guest-only
                          * deliberately stay local. LC32GetHostObject returns
@@ -830,15 +840,16 @@ void *LC32GetAssociatedGuestBuffer(id object, uint32_t requiredCapacity) {
     return (NSUInteger)host_ret;
 }
 
-#if 0
-// Can't hook this, host crashes with: Application circumvented Objective-C runtime dealloc initiation for <NSObject-like> object.
-- (void)dealloc {
-    static uint64_t _host_cmd;
-    if(!_host_cmd) _host_cmd = LC32GetHostSelector(_cmd);
-    uint64_t host_ret = LC32InvokeHostSelector(self.host_self, _host_cmd);
-    object_dispose(self);
+- (void)LC32_dealloc {
+    /* The original root implementation still destroys guest C++ ivars and
+     * associations before disposing the ARM32 allocation. Detach a dead
+     * native peer's guest key before that allocation becomes reusable; the
+     * host_self creation guard rejects reentry from this remaining cleanup.
+     * This never sends -dealloc to the native peer. */
+    if(!LC32UpdateHostMapping((uint32_t)(uintptr_t)self,
+            LC32HostMappingGuestRootDealloc, 0)) abort();
+    [self LC32_dealloc];
 }
-#endif
 @end
 
 static void addMethodToClass(Class cls, Method method) {
@@ -1173,6 +1184,7 @@ __attribute__((constructor)) void LC32FrameworkInit() {
     swizzle(clsNSObject, @selector(retainCount), @selector(LC32_retainCount));
     swizzle(clsNSObject, sel_registerName("retainWeakReference"),
             @selector(LC32_retainWeakReference));
+    swizzle(clsNSObject, @selector(dealloc), @selector(LC32_dealloc));
 
     // Send dlsym and LC32InvokeGuestC pointers to the host
     LC32InvokeHostCRet32(LC32Dlsym("LC32SetInvokeGuestFuncPtr", YES), &dlsym, &LC32InvokeGuestC);

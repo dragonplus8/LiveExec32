@@ -1315,6 +1315,56 @@ guest_mach_msg_trap(u32 guest_msg,
             }
             break;
         }
+        case 3825: { // mach_make_memory_entry_64
+            struct __attribute__((packed, aligned(4)))
+                    MakeMemoryEntryRequest32 {
+                mach_msg_header_t Head;
+                mach_msg_body_t Body;
+                mach_msg_port_descriptor_t parent_entry;
+                NDR_record_t NDR;
+                u64 size;
+                u64 offset;
+                vm_prot_t permission;
+            };
+            static_assert(sizeof(MakeMemoryEntryRequest32) == 68,
+                "unexpected ARM32 mach_make_memory_entry_64 request layout");
+
+            if (rcv_size < sizeof(mig_reply_error_t)) {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+            kern_return_t errorCode = MIG_BAD_ARGUMENTS;
+            if (send_size == sizeof(MakeMemoryEntryRequest32) &&
+                    (request_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
+                const auto request = *reinterpret_cast<
+                    const MakeMemoryEntryRequest32 *>(host_header);
+                if (request.Body.msgh_descriptor_count == 1 &&
+                        request.parent_entry.type ==
+                            MACH_MSG_PORT_DESCRIPTOR &&
+                        request.parent_entry.disposition ==
+                            MACH_MSG_TYPE_COPY_SEND) {
+                    /*
+                     * A memory entry aliases the original VM object. Guest
+                     * pages can have discontiguous host backing, and a host
+                     * entry also rounds to the host's larger page size.
+                     * Neither forwarding the guest address nor snapshotting
+                     * it would preserve those shared-memory semantics. Until
+                     * guest memory entries and vm_map_64 are implemented,
+                     * return an ordinary unsupported-operation result so
+                     * callers can apply their own failure handling.
+                     */
+                    errorCode = request.Head.msgh_request_port ==
+                            mach_task_self()
+                        ? KERN_NOT_SUPPORTED : KERN_INVALID_ARGUMENT;
+                }
+            }
+            auto *reply = reinterpret_cast<mig_reply_error_t *>(host_header);
+            host_header->msgh_size = sizeof(*reply);
+            reply->NDR = NDR_record;
+            reply->RetCode = errorCode;
+            break;
+        }
         case 3213: {
             MACH_MSG_UNION(mach_port_request_notification, Mess);
             /*

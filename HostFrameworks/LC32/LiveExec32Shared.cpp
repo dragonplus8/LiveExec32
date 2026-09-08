@@ -961,7 +961,7 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
     const std::string configuredGuestHome =
         LC32GuestBootstrap::SelectConfiguredHomeDirectory(
             getenv("LC32_GUEST_HOME"), getenv("LC_HOME_PATH"),
-            getenv("HOME"));
+            getenv("HOME"), getenv("SIMULATOR_UDID") != nullptr);
 
     /*
      * Snapshot explicit guest variables before any setenv call can replace
@@ -1034,6 +1034,12 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
      * meaningful value for early binaries rather than "not initialized". */
     guestExecutableSDKVersion = 0;
     u32 execAddr = Dynarmic_map_file(false, 0x11000000, execPath);
+    const int legacyLayoutError = LC32GuestBootstrap::EnsureLegacyBundleLayout(
+        configuredGuestHome, execPath, guestExecutableSDKVersion);
+    if(legacyLayoutError != 0) {
+        fprintf(stderr, "LC32: could not expose the legacy app bundle in HOME: %s\n",
+            strerror(legacyLayoutError));
+    }
     setenv("LC32_GUEST_EXECUTABLE", execPath, 1);
     LC32ConfigureLegacyAppTransportSecurity(
         guestExecutableSDKVersion);

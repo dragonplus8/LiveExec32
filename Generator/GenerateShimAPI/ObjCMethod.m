@@ -328,22 +328,31 @@ static NSString *LC32ReadableObjectType(const char *encoding) {
     return [name stringByAppendingString:@" *"];
 }
 
-BOOL LC32EncodingRepresentsCGColorRef(const char *encoding) {
+static BOOL LC32EncodingRepresentsOpaqueStructPointer(
+        const char *encoding, const char *structName) {
     while(encoding && *encoding && strchr("rnNoORVA", *encoding)) {
         encoding++;
     }
     if(!encoding || encoding[0] != '^' || encoding[1] != '{') return NO;
 
     const char *name = encoding + 2;
-    static const char cgColorName[] = "CGColor";
-    return !strncmp(name, cgColorName, sizeof(cgColorName) - 1) &&
-        (name[sizeof(cgColorName) - 1] == '=' ||
-         name[sizeof(cgColorName) - 1] == '}');
+    const size_t length = strlen(structName);
+    return !strncmp(name, structName, length) &&
+        (name[length] == '=' || name[length] == '}');
+}
+
+BOOL LC32EncodingRepresentsCGColorRef(const char *encoding) {
+    return LC32EncodingRepresentsOpaqueStructPointer(encoding, "CGColor");
+}
+
+BOOL LC32EncodingRepresentsCGImageRef(const char *encoding) {
+    return LC32EncodingRepresentsOpaqueStructPointer(encoding, "CGImage");
 }
 
 NSString *LC32ReadableTypeForEncoding(const char *encoding) {
     if(!encoding || !*encoding) return @"?";
     if(LC32EncodingRepresentsCGColorRef(encoding)) return @"CGColorRef";
+    if(LC32EncodingRepresentsCGImageRef(encoding)) return @"CGImageRef";
 
     if(*encoding == '"') {
         BOOL valid = YES;

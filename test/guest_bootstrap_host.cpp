@@ -1,11 +1,18 @@
 #include "guest_bootstrap.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
+#include <limits.h>
 #include <map>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -64,6 +71,195 @@ void TestConfiguredHomeDirectory() {
         nullptr, "/outer", selectedHome);
     selectedHome[1] = 'X';
     CHECK(snapshot == "/selected");
+}
+
+struct BundleLayoutFixture {
+    std::string root;
+    std::string home;
+    std::string bundle;
+    std::string executable;
+    std::string alias;
+    std::vector<std::pair<std::string, bool>> cleanup;
+
+    BundleLayoutFixture() {
+        char temporaryPath[] = "/private/tmp/lc32-bootstrap-XXXXXX";
+        char *created = mkdtemp(temporaryPath);
+        CHECK(created != nullptr);
+        if(!created) return;
+        root = created;
+        home = root + "/Home";
+        bundle = root + "/Game.app";
+        executable = bundle + "/Game";
+        alias = home + "/" + LC32GuestBootstrap::LegacyBundleAliasName;
+        MakeDirectory(home);
+        MakeDirectory(bundle);
+        MakeFile(bundle + "/Info.plist");
+        MakeFile(executable);
+    }
+
+    ~BundleLayoutFixture() {
+        // Only remove the exact fixture entries, never follow symlinks or
+        // recursively remove the directory supplied as a link's target.
+        for(auto entry = cleanup.rbegin(); entry != cleanup.rend(); ++entry) {
+            const int result = entry->second ?
+                rmdir(entry->first.c_str()) : unlink(entry->first.c_str());
+            CHECK(result == 0 || errno == ENOENT);
+        }
+        if(!root.empty()) CHECK(rmdir(root.c_str()) == 0);
+    }
+
+    void Track(const std::string &path, bool directory = false) {
+        CHECK(!root.empty() && path.compare(0, root.size() + 1,
+            root + "/") == 0);
+        cleanup.emplace_back(path, directory);
+    }
+
+    void MakeDirectory(const std::string &path) {
+        CHECK(mkdir(path.c_str(), 0700) == 0);
+        Track(path, true);
+    }
+
+    void MakeFile(const std::string &path) {
+        const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+        CHECK(fd >= 0);
+        if(fd >= 0) CHECK(close(fd) == 0);
+        Track(path);
+    }
+
+    void MakeLink(const std::string &target, const std::string &path) {
+        CHECK(symlink(target.c_str(), path.c_str()) == 0);
+        Track(path);
+    }
+};
+
+std::string ReadLink(const std::string &path) {
+    char value[PATH_MAX];
+    const ssize_t length = readlink(path.c_str(), value, sizeof(value));
+    CHECK(length >= 0);
+    return length >= 0 ? std::string(value, static_cast<std::size_t>(length)) :
+        std::string();
+}
+
+bool EntryExists(const std::string &path) {
+    struct stat metadata = {};
+    return lstat(path.c_str(), &metadata) == 0;
+}
+
+void TestConfiguredHomeResolution() {
+    using LC32GuestBootstrap::SelectConfiguredHomeDirectory;
+    BundleLayoutFixture fixture;
+    if(fixture.root.empty()) return;
+    const std::string homeLink = fixture.root + "/LongContainerPath";
+    fixture.MakeLink(fixture.home, homeLink);
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", homeLink.c_str()) == homeLink);
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", homeLink.c_str(), false) == homeLink);
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", homeLink.c_str(), true) == fixture.home);
+    CHECK(SelectConfiguredHomeDirectory(
+        homeLink.c_str(), "/outer", fixture.bundle.c_str(), true) ==
+        fixture.home);
+    CHECK(SelectConfiguredHomeDirectory(
+        homeLink.c_str(), nullptr, fixture.bundle.c_str(), false) == homeLink);
+    CHECK(SelectConfiguredHomeDirectory(
+        "relative", "/outer", homeLink.c_str(), true) == fixture.home);
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, nullptr, homeLink.c_str(), true).empty());
+    const std::string missing = fixture.root + "/MissingHome";
+    CHECK(SelectConfiguredHomeDirectory(
+        missing.c_str(), "/outer", homeLink.c_str(), true) == missing);
+    CHECK(SelectConfiguredHomeDirectory(
+        nullptr, "/outer", missing.c_str(), true) == missing);
+}
+
+void TestLegacyBundleLayout() {
+    using LC32GuestBootstrap::EnsureLegacyBundleLayout;
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        fixture.Track(fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0x00070000) == 0);
+        CHECK(ReadLink(fixture.alias) == fixture.bundle);
+        struct stat original = {};
+        CHECK(lstat(fixture.alias.c_str(), &original) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0) == 0);
+        struct stat repeated = {};
+        CHECK(lstat(fixture.alias.c_str(), &repeated) == 0);
+        CHECK(S_ISLNK(repeated.st_mode));
+        CHECK(original.st_ino == repeated.st_ino);
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        fixture.MakeLink("../Game.app", fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0) == 0);
+        CHECK(ReadLink(fixture.alias) == "../Game.app");
+    }
+    for(int kind = 0; kind < 4; kind++) {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        if(kind == 0) {
+            fixture.MakeFile(fixture.alias);
+        } else if(kind == 1) {
+            fixture.MakeDirectory(fixture.alias);
+            fixture.MakeFile(fixture.alias + "/user-data");
+        } else {
+            fixture.MakeLink(kind == 2 ? fixture.root :
+                fixture.root + "/missing-target", fixture.alias);
+        }
+        struct stat original = {};
+        CHECK(lstat(fixture.alias.c_str(), &original) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0) == EEXIST);
+        struct stat preserved = {};
+        CHECK(lstat(fixture.alias.c_str(), &preserved) == 0);
+        CHECK(original.st_ino == preserved.st_ino);
+        CHECK(original.st_mode == preserved.st_mode);
+        if(kind == 1) CHECK(EntryExists(fixture.alias + "/user-data"));
+        if(kind >= 2) CHECK(ReadLink(fixture.alias) ==
+            (kind == 2 ? fixture.root : fixture.root + "/missing-target"));
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0x00080000) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            "", fixture.executable, 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            "relative", fixture.executable, 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            "/", fixture.executable, 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, "/usr/bin/test", 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, "Game.app/Game", 0) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.bundle + "/missing", 0) == 0);
+        CHECK(!EntryExists(fixture.alias));
+        CHECK(unlink((fixture.bundle + "/Info.plist").c_str()) == 0);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0) == 0);
+        CHECK(!EntryExists(fixture.alias));
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.root + "/missing-home", fixture.executable, 0) == ENOENT);
+        const std::string homeLink = fixture.root + "/HomeLink";
+        fixture.MakeLink(fixture.home, homeLink);
+        CHECK(EnsureLegacyBundleLayout(homeLink, fixture.executable, 0) != 0);
+        CHECK(!EntryExists(fixture.alias));
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.root, fixture.executable, 0) == 0);
+        CHECK(!EntryExists(fixture.root + "/" +
+            LC32GuestBootstrap::LegacyBundleAliasName));
+    }
 }
 
 void TestEnvironmentSelection() {
@@ -379,6 +575,8 @@ void TestStackExhaustion() {
 
 int main() {
     TestConfiguredHomeDirectory();
+    TestConfiguredHomeResolution();
+    TestLegacyBundleLayout();
     TestEnvironmentSelection();
     TestEnvironmentFinalization();
     TestDyldPrintOptIn();

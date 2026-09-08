@@ -13,6 +13,7 @@ FIXTURE_SOURCE="$TEMP_ROOT/UIKit/LC32ScalarPointerFixture.m"
 NSSTRING_SOURCE="$TEMP_ROOT/UIKit/NSString.m"
 UIDEVICE_SOURCE="$TEMP_ROOT/UIKit/UIDevice.m"
 UICOLOR_SOURCE="$TEMP_ROOT/UIKit/UIColor.m"
+CGIMAGE_SOURCE="$TEMP_ROOT/UIKit/LC32CGImageFixture.m"
 
 require_line() {
     needle=$1
@@ -95,9 +96,20 @@ if grep -Fq '@dynamic CGColor;' "$UICOLOR_SOURCE"; then
     exit 1
 fi
 
+require_line '- (CGImageRef)CGImage {' "$CGIMAGE_SOURCE"
+require_line 'return (__bridge CGImageRef)guest_ret;' "$CGIMAGE_SOURCE"
+require_line '- (id)initWithCGImage:(CGImageRef)guest_arg0 {' "$CGIMAGE_SOURCE"
+require_line \
+    '- (id)initWithCGImage:(CGImageRef)guest_arg0 scale:(float)guest_arg1 orientation:(int)guest_arg2 {' \
+    "$CGIMAGE_SOURCE"
+require_line 'uint64_t host_arg0 = [(__bridge id)guest_arg0 host_self];' "$CGIMAGE_SOURCE"
+require_line 'double host_arg1 = (double)guest_arg1;' "$CGIMAGE_SOURCE"
+require_line 'return LC32AdoptHostInitializerResult(self, host_ret);' "$CGIMAGE_SOURCE"
+
 if grep -Fq 'FIXME: has unhandled types' "$FIXTURE_SOURCE" ||
    grep -Fq 'FIXME: has unhandled types' "$NSSTRING_SOURCE" ||
-   grep -Fq 'FIXME: has unhandled types' "$UICOLOR_SOURCE"; then
+   grep -Fq 'FIXME: has unhandled types' "$UICOLOR_SOURCE" ||
+   grep -Fq 'FIXME: has unhandled types' "$CGIMAGE_SOURCE"; then
     echo "Scalar-pointer fixture was still disabled as unhandled" >&2
     exit 1
 fi

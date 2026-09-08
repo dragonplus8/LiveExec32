@@ -359,6 +359,15 @@ typedef enum : uint32_t {
     LC32CoreFoundationOpWriteStreamCreateWithFile = 1101,
     LC32CoreFoundationOpWriteStreamCreateWithAllocatedBuffers = 1102,
     LC32CoreFoundationOpStreamCreateBoundPair = 1103,
+
+    /* Preserve raw ARM32 pointer values in NULL-callback CF arrays. */
+    LC32CoreFoundationOpArrayCreateCopy = 1200,
+    LC32CoreFoundationOpArrayCreateMutableCopy = 1201,
+    LC32CoreFoundationOpArrayAppendValue = 1202,
+    LC32CoreFoundationOpArrayInsertValueAtIndex = 1203,
+    LC32CoreFoundationOpArraySetValueAtIndex = 1204,
+    LC32CoreFoundationOpArrayGetValueAtIndex = 1205,
+    LC32CoreFoundationOpArrayExchangeValuesAtIndices = 1206,
 } LC32CoreFoundationOpcode;
 
 typedef enum : uint32_t {
