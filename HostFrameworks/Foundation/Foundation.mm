@@ -2,6 +2,7 @@
 #import "bridge.h"
 #include "../../GuestFrameworks/Foundation/LC32FoundationBridge.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -115,9 +116,41 @@ u32 LC32_Foundation_CreateDelayedTimer(u32 guestCall, u32, u32) {
         sizeof(interval));
     if(!target || !selector) return 0;
 
-    NSTimer *timer = [NSTimer timerWithTimeInterval:interval
+        NSTimer *timer = [NSTimer timerWithTimeInterval:interval
         target:target selector:selector userInfo:nil repeats:NO];
     return timer.guest_self;
+}
+
+/*
+ * lc32_fireDelayedPerform:'s own dispatch to the real target/selector stays
+ * entirely inside the guest -- it never re-enters LC32InvokeGuestSelectorRaw,
+ * so LC32LastGuestSelectorDescription is left stuck naming that trampoline
+ * instead of whatever's actually about to run, right before a crash inside
+ * it. Called from the guest immediately before that dispatch. Formatted
+ * identically to LC32InvokeGuestSelectorRaw's own update so both look the
+ * same in a crash report.
+ */
+u32 LC32_Foundation_RecordLastGuestSelector(u32 guestCall, u32, u32) {
+    LC32FoundationRecordLastSelectorCall call = {};
+    if(!guestCall ||
+       Dynarmic_mem_1read(guestCall, sizeof(call),
+           reinterpret_cast<char *>(&call)) != 0 ||
+       call.version != LC32FoundationRecordLastSelectorABIVersion ||
+       call.slotCount != LC32FoundationRecordLastSelectorSlotCount) {
+        return 0;
+    }
+
+    id target = reinterpret_cast<id>(static_cast<uintptr_t>(
+        call.slots[LC32FoundationRecordLastSelectorTargetSlot]));
+    SEL selector = reinterpret_cast<SEL>(static_cast<uintptr_t>(
+        call.slots[LC32FoundationRecordLastSelectorSelectorSlot]));
+    if(!target || !selector) return 0;
+
+    snprintf(LC32LastGuestSelectorDescription,
+        sizeof(LC32LastGuestSelectorDescription), "%c[%s %s]",
+        object_isClass(target) ? '+' : '-',
+        class_getName(object_getClass(target)), sel_getName(selector));
+    return 0;
 }
 
 __END_DECLS
