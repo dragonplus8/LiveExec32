@@ -5486,6 +5486,7 @@ Class guest_objc_getClass_retHostClass(const char *name) {
     // resolve methods and register a dynamic resolver
     [LC32ObjCMethodResolver registerClass:outClass];
     LC32UIKitPrepareGuestClass(outClass);
+    LC32CFNetworkPrepareGuestClass(outClass);
     // register to objc
     objc_registerClassPair(outClass);
     [outClass setGuestClass:YES];
