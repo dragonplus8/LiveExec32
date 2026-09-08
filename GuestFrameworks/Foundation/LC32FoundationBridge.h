@@ -34,3 +34,19 @@ enum {
     LC32FoundationDelayedTimerSelectorSlot = 1,
     LC32FoundationDelayedTimerIntervalSlot = 2,
 };
+
+enum {
+    LC32FoundationRecordLastSelectorABIVersion = 1,
+    LC32FoundationRecordLastSelectorSlotCount = 2,
+};
+
+typedef struct {
+    uint32_t version;
+    uint32_t slotCount;
+    uint64_t slots[LC32FoundationRecordLastSelectorSlotCount];
+} LC32FoundationRecordLastSelectorCall;
+
+enum {
+    LC32FoundationRecordLastSelectorTargetSlot = 0,
+    LC32FoundationRecordLastSelectorSelectorSlot = 1,
+};
