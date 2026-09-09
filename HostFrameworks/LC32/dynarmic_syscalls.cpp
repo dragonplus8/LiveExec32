@@ -4409,6 +4409,38 @@ int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
             Dynarmic_mem_1write(guest_r2, sizeof(struct log2phys), (char *)&host_r2);
             return result;
         }
+        
+        case F_GETLK:
+        case F_OFD_GETLK:
+        case F_SETLK:
+        case F_OFD_SETLK:
+        case F_SETLKW:
+        case F_OFD_SETLKW: {
+            /*
+             * struct flock keeps the same field order and widths on both
+             * sides of this ABI (off_t is always 64-bit on Darwin, even for
+             * the 32-bit guest slice), so no manual field translation is
+             * needed - same trust already placed in the F_RDADVISE/
+             * F_LOG2PHYS cases above.
+             */
+            struct flock host_r2;
+            if (Dynarmic_mem_1read(guest_r2, sizeof(host_r2), (char *)&host_r2) != 0) {
+                return return_with_carry_direct(EFAULT, true);
+            }
+            int result = debugger_aware_host_wait(
+                [&] {
+                    return syscallRetCarry(
+                        SYS_fcntl, fildes, cmd, &host_r2, 0, 0, 0, 0);
+                },
+                return_with_carry_direct(EINTR, true));
+            // Only the GETLK-style commands mutate the struct on success.
+            if ((cmd == F_GETLK || cmd == F_OFD_GETLK) &&
+                    !threadHandle.cpsr->hasCarry()) {
+                Dynarmic_mem_1write(guest_r2, sizeof(host_r2), (char *)&host_r2);
+            }
+            return result;
+        }
+        
         default:
             printf("Unhandled fcntl command: %d\n", cmd);
             SetPendingGuestCrashMessage(
