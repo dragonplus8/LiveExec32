@@ -717,6 +717,48 @@ public:
             threadHandle.cpsr->isNegative(), threadHandle.cpsr->isZero(),
             threadHandle.cpsr->hasCarry(), threadHandle.cpsr->isOverflow());
 
+        /*
+         * For MemoryRead SIGSEGV crashes specifically, several registers
+         * often hold plausible base pointers even though the fault address
+         * itself isn't readable (that's why it faulted). Safely probe each
+         * one -- read_guest_memory_with_permissions never throws, it just
+         * returns false for unmapped/unreadable memory, so this can't turn
+         * one fault into a second one. Registers that aren't readable are
+         * silently skipped, so only genuinely mapped candidates show up.
+         * This distinguishes "reading real, valid, still-zeroed memory"
+         * (an ordering/init-timing bug) from "reading garbage" (a corrupted
+         * pointer somewhere upstream) without needing a disassembler.
+         */
+        {
+            static const char *const registerNames[] = {
+                "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
+                "r8", "r9", "r10", "r11", "r12"};
+            std::string memoryReport;
+            for (int index = 0; index < 13; ++index) {
+                const u32 candidate = registers[index];
+                if (!candidate) continue;
+                uint8_t bytes[16] = {0};
+                if (!read_guest_memory_with_permissions(
+                        candidate, bytes, sizeof(bytes), PROT_READ)) {
+                    continue;
+                }
+                AppendCrashReportFormat(memoryReport,
+                    " %-3s [0x%08x]: %02x %02x %02x %02x %02x %02x %02x "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                    registerNames[index], candidate,
+                    bytes[0], bytes[1], bytes[2], bytes[3],
+                    bytes[4], bytes[5], bytes[6], bytes[7],
+                    bytes[8], bytes[9], bytes[10], bytes[11],
+                    bytes[12], bytes[13], bytes[14], bytes[15]);
+            }
+            if (!memoryReport.empty()) {
+                AppendCrashReportText(report, "Nearby memory:\n");
+                AppendCrashReportText(report, memoryReport);
+            }
+        }
+
+        AppendCrashReportText(report, "Call stack:\n");
+
         AppendCrashReportText(report, "Call stack:\n");
         for (int index = 0; index < callStackLength; ++index) {
             const symbolicated_call &call = callStack[index];
