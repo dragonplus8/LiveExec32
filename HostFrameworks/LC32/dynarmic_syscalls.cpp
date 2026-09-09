@@ -4,36 +4,6 @@
 
 #include <poll.h>
 
-/* Darwin keeps some record-lock fcntl commands as SPI, so public SDKs may
- * omit their names even though the syscall ABI remains available. */
-#ifndef F_SETLKWTIMEOUT
-#define F_SETLKWTIMEOUT 10
-#endif
-#ifndef F_GETLKPID
-#define F_GETLKPID 66
-#endif
-#ifndef F_OFD_SETLK
-#define F_OFD_SETLK 90
-#endif
-#ifndef F_OFD_SETLKW
-#define F_OFD_SETLKW 91
-#endif
-#ifndef F_OFD_GETLK
-#define F_OFD_GETLK 92
-#endif
-#ifndef F_OFD_SETLKWTIMEOUT
-#define F_OFD_SETLKWTIMEOUT 93
-#endif
-#ifndef F_OFD_GETLKPID
-#define F_OFD_GETLKPID 94
-#endif
-#ifndef F_SETCONFINED
-#define F_SETCONFINED 95
-#endif
-#ifndef F_GETCONFINED
-#define F_GETCONFINED 96
-#endif
-
 extern "C" kern_return_t host_get_io_main(
     host_t host, io_main_t *io_main) __attribute__((weak_import));
 extern "C" kern_return_t host_get_io_master(
@@ -347,7 +317,7 @@ int guest_shm_open(u32 guest_name, int oflag, int mode) {
     if(copy_error != 0) {
         return return_with_carry_direct(copy_error, true);
     }
-    LC32_DEBUG_PRINTF("LC32: shm_open %s\n", host_name);
+    printf("LC32: shm_open %s\n", host_name);
     return syscallRetCarry(SYS_shm_open, host_name, oflag, mode);
 }
 
@@ -774,7 +744,7 @@ guest_mach_msg_trap(u32 guest_msg,
         return MACH_SEND_INVALID_DEST;
     }
 
-    LC32_DEBUG_PRINTF("LC32: mach_msg_trap id %d\n", host_header->msgh_id);
+    printf("LC32: mach_msg_trap id %d\n", host_header->msgh_id);
 
     // pre-process reply header
     const mach_msg_bits_t request_bits = host_header->msgh_bits;
@@ -1158,7 +1128,7 @@ guest_mach_msg_trap(u32 guest_msg,
                 // can resolve this original guest path through its matching
                 // DeviceSupport Symbols tree.
                 ++guestMappingGeneration;
-                LC32_DEBUG_PRINTF("LC32: added image %s (0x%08x-0x%08x)\n",
+                printf("LC32: added image %s (0x%08x-0x%08x)\n",
                        guestMappings[mappingIndex].name,
                        guestMappings[mappingIndex].start,
                        guestMappings[mappingIndex].end);
@@ -1249,120 +1219,6 @@ guest_mach_msg_trap(u32 guest_msg,
                         request.dest_address,
                         request.size)
                     : KERN_INVALID_ARGUMENT;
-            break;
-        }
-        case 3809: { // vm_read_overwrite
-            /*
-             * Like vm_copy, this request contains ARM32 virtual addresses,
-             * not host pointers. Keep both the request and the returned size
-             * at the guest's 32-bit width, and copy within the guest map.
-             */
-            struct __attribute__((packed, aligned(4))) VmReadOverwriteRequest32 {
-                mach_msg_header_t Head;
-                NDR_record_t NDR;
-                u32 address;
-                u32 size;
-                u32 data;
-            };
-            struct __attribute__((packed, aligned(4))) VmReadOverwriteReply32 {
-                mach_msg_header_t Head;
-                NDR_record_t NDR;
-                kern_return_t RetCode;
-                u32 outsize;
-            };
-            static_assert(sizeof(VmReadOverwriteRequest32) == 44,
-                "unexpected ARM32 vm_read_overwrite request layout");
-            static_assert(sizeof(VmReadOverwriteReply32) == 40,
-                "unexpected ARM32 vm_read_overwrite reply layout");
-
-            /* MIG leaves msgh_size unset on send; the trap's send_size is
-             * authoritative, and the kernel normally fills the header. */
-            if (send_size != sizeof(VmReadOverwriteRequest32) ||
-                    (request_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
-                if (rcv_size < sizeof(mig_reply_error_t)) {
-                    host_header->msgh_size = sizeof(mig_reply_error_t);
-                    result = MACH_RCV_TOO_LARGE;
-                } else {
-                    auto *error = reinterpret_cast<mig_reply_error_t *>(
-                        host_header);
-                    host_header->msgh_size = sizeof(*error);
-                    error->NDR = NDR_record;
-                    error->RetCode = MIG_BAD_ARGUMENTS;
-                }
-                break;
-            }
-            if (rcv_size < sizeof(VmReadOverwriteReply32)) {
-                host_header->msgh_size = sizeof(VmReadOverwriteReply32);
-                result = MACH_RCV_TOO_LARGE;
-                break;
-            }
-
-            const auto request = *reinterpret_cast<
-                const VmReadOverwriteRequest32 *>(host_header);
-            auto *reply = reinterpret_cast<VmReadOverwriteReply32 *>(
-                host_header);
-            reply->NDR = NDR_record;
-            reply->RetCode =
-                request.Head.msgh_request_port == mach_task_self()
-                    ? CopyGuestVmMemory(request.address,
-                        request.data, request.size)
-                    : KERN_INVALID_ARGUMENT;
-            if (reply->RetCode == KERN_SUCCESS) {
-                reply->outsize = request.size;
-                host_header->msgh_size = sizeof(*reply);
-            } else {
-                host_header->msgh_size = sizeof(mig_reply_error_t);
-            }
-            break;
-        }
-        case 3825: { // mach_make_memory_entry_64
-            struct __attribute__((packed, aligned(4)))
-                    MakeMemoryEntryRequest32 {
-                mach_msg_header_t Head;
-                mach_msg_body_t Body;
-                mach_msg_port_descriptor_t parent_entry;
-                NDR_record_t NDR;
-                u64 size;
-                u64 offset;
-                vm_prot_t permission;
-            };
-            static_assert(sizeof(MakeMemoryEntryRequest32) == 68,
-                "unexpected ARM32 mach_make_memory_entry_64 request layout");
-
-            if (rcv_size < sizeof(mig_reply_error_t)) {
-                host_header->msgh_size = sizeof(mig_reply_error_t);
-                result = MACH_RCV_TOO_LARGE;
-                break;
-            }
-            kern_return_t errorCode = MIG_BAD_ARGUMENTS;
-            if (send_size == sizeof(MakeMemoryEntryRequest32) &&
-                    (request_bits & MACH_MSGH_BITS_COMPLEX) != 0) {
-                const auto request = *reinterpret_cast<
-                    const MakeMemoryEntryRequest32 *>(host_header);
-                if (request.Body.msgh_descriptor_count == 1 &&
-                        request.parent_entry.type ==
-                            MACH_MSG_PORT_DESCRIPTOR &&
-                        request.parent_entry.disposition ==
-                            MACH_MSG_TYPE_COPY_SEND) {
-                    /*
-                     * A memory entry aliases the original VM object. Guest
-                     * pages can have discontiguous host backing, and a host
-                     * entry also rounds to the host's larger page size.
-                     * Neither forwarding the guest address nor snapshotting
-                     * it would preserve those shared-memory semantics. Until
-                     * guest memory entries and vm_map_64 are implemented,
-                     * return an ordinary unsupported-operation result so
-                     * callers can apply their own failure handling.
-                     */
-                    errorCode = request.Head.msgh_request_port ==
-                            mach_task_self()
-                        ? KERN_NOT_SUPPORTED : KERN_INVALID_ARGUMENT;
-                }
-            }
-            auto *reply = reinterpret_cast<mig_reply_error_t *>(host_header);
-            host_header->msgh_size = sizeof(*reply);
-            reply->NDR = NDR_record;
-            reply->RetCode = errorCode;
             break;
         }
         case 3213: {
@@ -1615,28 +1471,6 @@ guest_mach_msg_trap(u32 guest_msg,
             host_header->msgh_size = sizeof(*reply);
             break;
         }
-        case 3605: // thread_suspend
-        case 3606: { // thread_resume
-            /* Both ARM32 requests contain only the Mach header. These are
-             * logical guest-thread operations, never host thread_suspend on
-             * the synthetic port or the emulator's native pthread. */
-            const bool validRequest = send_size == sizeof(mach_msg_header_t) &&
-                (request_bits & MACH_MSGH_BITS_COMPLEX) == 0;
-            if (rcv_size < sizeof(mig_reply_error_t)) {
-                host_header->msgh_size = sizeof(mig_reply_error_t);
-                result = MACH_RCV_TOO_LARGE;
-                break;
-            }
-            const kern_return_t kr = validRequest
-                ? ChangeGuestThreadSuspendCount(
-                    host_header->msgh_request_port, host_header->msgh_id == 3605)
-                : MIG_BAD_ARGUMENTS;
-            auto *reply = reinterpret_cast<mig_reply_error_t *>(host_header);
-            reply->NDR = NDR_record;
-            reply->RetCode = kr;
-            host_header->msgh_size = sizeof(*reply);
-            break;
-        }
         case 3603: { // thread_get_state
             /*
              * thread_act.defs uses natural_t arrays, so this wire layout is
@@ -1839,6 +1673,42 @@ guest_mach_msg_trap(u32 guest_msg,
                     sizeof(info[0]) * count);
             }
             host_header->msgh_size = replySize;
+            break;
+        }
+        case 3605: // thread_suspend
+        case 3606: { // thread_resume
+            /*
+             * Neither routine carries a request body beyond the standard
+             * header -- the target is msgh_request_port itself -- and the
+             * reply is a bare kern_return_t, so mig_reply_error_t covers
+             * both directions.
+             */
+            if (send_size != sizeof(mach_msg_header_t)) {
+                if (rcv_size < sizeof(mig_reply_error_t)) {
+                    host_header->msgh_size = sizeof(mig_reply_error_t);
+                    result = MACH_RCV_TOO_LARGE;
+                } else {
+                    auto *error = reinterpret_cast<mig_reply_error_t *>(
+                        host_header);
+                    host_header->msgh_size = sizeof(*error);
+                    error->NDR = NDR_record;
+                    error->RetCode = MIG_BAD_ARGUMENTS;
+                }
+                break;
+            }
+            if (rcv_size < sizeof(mig_reply_error_t)) {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+            const kern_return_t kr = host_header->msgh_id == 3605
+                ? SuspendGuestThread(host_header->msgh_request_port)
+                : ResumeGuestThread(host_header->msgh_request_port);
+            auto *reply2 = reinterpret_cast<mig_reply_error_t *>(
+                host_header);
+            host_header->msgh_size = sizeof(*reply2);
+            reply2->NDR = NDR_record;
+            reply2->RetCode = kr;
             break;
         }
         case 3409: {
@@ -2198,8 +2068,7 @@ int guest_statfs64(u32 guest_path, u32 guest_buf) {
         return return_with_carry_direct(path_error, true);
     }
     struct statfs host_buf;
-    int result = syscallRetCarry(
-        SYS_statfs64, host_path, &host_buf, 0,0,0,0,0);
+    int result = syscallRetCarry(SYS_statfs, host_path, &host_buf, 0,0,0,0,0);
     if(result == 0) {
         Dynarmic_mem_1write(guest_buf, sizeof(struct statfs), (char *)&host_buf);
     }
@@ -2208,8 +2077,7 @@ int guest_statfs64(u32 guest_path, u32 guest_buf) {
 
 int guest_fstatfs64(int fildes, u32 guest_buf) {
     struct statfs host_buf;
-    int result = syscallRetCarry(
-        SYS_fstatfs64, fildes, &host_buf, 0,0,0,0,0);
+    int result = syscallRetCarry(SYS_fstatfs, fildes, &host_buf, 0,0,0,0,0);
     if(result == 0) {
         Dynarmic_mem_1write(guest_buf, sizeof(struct statfs), (char *)&host_buf);
     }
@@ -2559,54 +2427,11 @@ int guest_kevent_qos(int kq, u32 changelist, int nchanges,
 }
 
 int guest_sandbox_ms(u32 guest_policyname, int call, u32 guest_arg) {
-    char host_policyname[PATH_MAX];
-    const int policyError =
-        LC32CopyGuestCString(guest_policyname, host_policyname);
-    if(policyError) return return_with_carry_direct(policyError, true);
-    LC32_DEBUG_PRINTF("sandbox(%s, %d)\n", host_policyname, call);
-    if(strcmp(host_policyname, "Sandbox") == 0 && call == 4) {
-        /*
-         * iOS 10 sandbox_container_path_for_pid uses three 64-bit argument
-         * slots even on ARM32. libsystem_containermanager immediately uses
-         * this output to replace HOME/CFFIXED_USER_HOME and derive TMPDIR.
-         * Reporting success without filling it copied uninitialized guest
-         * stack bytes into those environment variables.
-         */
-        struct GuestSandboxContainerPathArguments {
-            u64 pid;
-            u64 buffer;
-            u64 capacity;
-        } arguments = {};
-        static_assert(sizeof(arguments) == 24);
-        if(!read_guest_memory_with_permissions(
-                guest_arg, &arguments, sizeof(arguments), PROT_READ)) {
-            return return_with_carry_direct(EFAULT, true);
-        }
-        if(arguments.pid != 0 &&
-                arguments.pid != static_cast<u64>(getpid())) {
-            return return_with_carry_direct(ENOTSUP, true);
-        }
-        if(arguments.buffer == 0 || arguments.buffer > UINT32_MAX) {
-            return return_with_carry_direct(EFAULT, true);
-        }
-        const char *home = getenv("LC32_GUEST_HOME");
-        const std::string guestHome = home ? home : "";
-        if(guestHome.empty() || guestHome[0] != '/') {
-            return return_with_carry_direct(ENOTSUP, true);
-        }
-        const size_t required = guestHome.size() + 1;
-        if(arguments.capacity < required) {
-            return return_with_carry_direct(ENAMETOOLONG, true);
-        }
-        if(!write_guest_memory_with_permissions(
-                arguments.buffer, guestHome.c_str(), required,
-                PROT_WRITE)) {
-            return return_with_carry_direct(EFAULT, true);
-        }
-        return return_with_carry_direct(0, false);
-    }
-    // TODO: translate the remaining sandbox operations and their outputs.
-    return return_with_carry_direct(0, false);
+    // TODO: ???
+    char host_policyname[0x20];
+    Dynarmic_mem_1read(guest_policyname, sizeof(host_policyname), host_policyname);
+    printf("sandbox(%s, %d)\n", host_policyname, call);
+    return 0;
 }
 
 int guest_getentropy(u32 guest_buffer, u32 length) {
@@ -4042,9 +3867,9 @@ int guest_sigaction(int sig, u32 guest_act, u32 guest_oact) {
         Dynarmic_mem_1write(guest_oact, sizeof(sigaction_32), (char *)&host_actions[sig]);
     }
     if (guest_act) {
-        LC32_DEBUG_PRINTF("LC32: sigaction: 0x%08x -> ", host_actions[sig]._sa_handler);
+        printf("LC32: sigaction: 0x%08x -> ", host_actions[sig]._sa_handler);
         Dynarmic_mem_1read(guest_act, sizeof(sigaction_32), (char *)&host_actions[sig]);
-        LC32_DEBUG_PRINTF("LC32: 0x%08x\n", host_actions[sig]._sa_handler);
+        printf("LC32: 0x%08x\n", host_actions[sig]._sa_handler);
     }
     return 0;
 }
@@ -4409,113 +4234,16 @@ int guest_mprotect(u32 guest_addr, size_t len, int prot) {
     return result;
 }
 
-/* The armv7 flock layout is 24 bytes.  Spell it out rather than passing the
- * guest object through as struct flock: that happens to have the same layout
- * today, while the adjacent timespec grows from 8 to 16 bytes on arm64. */
-struct GuestFlock {
-    int64_t start;
-    int64_t length;
-    int32_t pid;
-    int16_t type;
-    int16_t whence;
-};
-
-struct GuestFlockTimeout {
-    GuestFlock lock;
-    timespec_32 timeout;
-};
-
-struct HostFlockTimeout {
-    struct flock lock;
-    struct timespec timeout;
-};
-
-static_assert(sizeof(GuestFlock) == 24,
-    "unexpected armv7 flock layout");
-static_assert(sizeof(GuestFlockTimeout) == 32,
-    "unexpected armv7 flocktimeout layout");
-static_assert(offsetof(GuestFlockTimeout, timeout) == 24,
-    "unexpected armv7 flocktimeout padding");
-
-static struct flock HostFlockFromGuest(const GuestFlock &guest) {
-    struct flock host = {};
-    host.l_start = guest.start;
-    host.l_len = guest.length;
-    host.l_pid = guest.pid;
-    host.l_type = guest.type;
-    host.l_whence = guest.whence;
-    return host;
-}
-
-static GuestFlock GuestFlockFromHost(const struct flock &host) {
-    return {
-        host.l_start,
-        host.l_len,
-        host.l_pid,
-        host.l_type,
-        host.l_whence,
-    };
-}
-
-static int GuestFcntlSetLock(
-        int fildes, int command, u32 guestArgument) {
-    const bool hasTimeout = command == F_SETLKWTIMEOUT ||
-        command == F_OFD_SETLKWTIMEOUT;
-    GuestFlock guestLock = {};
-    HostFlockTimeout hostTimeout = {};
-    void *hostArgument = &hostTimeout.lock;
-
-    if(hasTimeout) {
-        GuestFlockTimeout guestTimeout = {};
-        if(!read_guest_memory_with_permissions(
-                guestArgument, &guestTimeout, sizeof(guestTimeout),
-                PROT_READ)) {
-            return return_with_carry_direct(EFAULT, true);
-        }
-        guestLock = guestTimeout.lock;
-        hostTimeout.timeout.tv_sec = guestTimeout.timeout.tv_sec;
-        hostTimeout.timeout.tv_nsec = guestTimeout.timeout.tv_nsec;
-    } else if(!read_guest_memory_with_permissions(
-            guestArgument, &guestLock, sizeof(guestLock), PROT_READ)) {
-        return return_with_carry_direct(EFAULT, true);
-    }
-    hostTimeout.lock = HostFlockFromGuest(guestLock);
-
-    const auto invoke = [&] {
-        return syscallRetCarry(
-            SYS_fcntl, fildes, command, hostArgument,
-            0, 0, 0, 0);
-    };
-    if(command == F_SETLKW || command == F_SETLKWTIMEOUT ||
-            command == F_OFD_SETLKW ||
-            command == F_OFD_SETLKWTIMEOUT) {
-        return debugger_aware_host_wait(
-            invoke, return_with_carry_direct(EINTR, true));
-    }
-    return invoke();
-}
-
-static int GuestFcntlGetLock(
-        int fildes, int command, u32 guestArgument) {
-    GuestFlock guestLock = {};
-    if(!read_guest_memory_with_permissions(
-            guestArgument, &guestLock, sizeof(guestLock), PROT_READ)) {
-        return return_with_carry_direct(EFAULT, true);
-    }
-
-    struct flock hostLock = HostFlockFromGuest(guestLock);
-    const int result = syscallRetCarry(
-        SYS_fcntl, fildes, command, &hostLock,
-        0, 0, 0, 0);
-    if(threadHandle.cpsr->hasCarry()) return result;
-
-    guestLock = GuestFlockFromHost(hostLock);
-    if(!write_guest_memory_with_permissions(
-            guestArgument, &guestLock, sizeof(guestLock), PROT_WRITE)) {
-        return return_with_carry_direct(EFAULT, true);
-    }
-    return result;
-}
+#ifndef F_SETCONFINED
+/*
+ * "confine" OFD to process (fcntl.h, command 95). Real command, real
+ * number -- confirmed against Apple's own XNU source -- but declared
+ * inside an #ifdef PRIVATE block in fcntl.h, so it isn't visible to a
+ * normal public-SDK build like this project's. Defined locally rather
+ * than building against private headers.
+ */
+#define F_SETCONFINED 95
+#endif
 
 int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
     switch (cmd) {
@@ -4547,20 +4275,7 @@ int guest_fcntl(int fildes, int cmd, u32 guest_r2) {
         case F_RDAHEAD:
         case F_NOCACHE:
         case F_SETCONFINED:
-        case F_GETCONFINED:
             return syscallRetCarry(SYS_fcntl, fildes, cmd, guest_r2, 0,0,0,0);
-        case F_SETLK:
-        case F_SETLKW:
-        case F_SETLKWTIMEOUT:
-        case F_OFD_SETLK:
-        case F_OFD_SETLKW:
-        case F_OFD_SETLKWTIMEOUT:
-            return GuestFcntlSetLock(fildes, cmd, guest_r2);
-        case F_GETLK:
-        case F_GETLKPID:
-        case F_OFD_GETLK:
-        case F_OFD_GETLKPID:
-            return GuestFcntlGetLock(fildes, cmd, guest_r2);
         case F_FULLFSYNC:
             return debugger_aware_host_wait(
                 [&] {
@@ -4825,19 +4540,18 @@ kern_return_t guest__kernelrpc_mach_vm_allocate_trap(u32 target, u32 guest_addre
 
     const bool anywhere = (flags & VM_FLAGS_ANYWHERE) != 0;
     const bool overwrite = (flags & VM_FLAGS_OVERWRITE) != 0;
-    uint64_t suppliedAddress = 0;
-    if (!read_guest_memory_with_permissions(
-            guest_address, &suppliedAddress,
-            sizeof(suppliedAddress), PROT_READ)) {
-        return KERN_INVALID_ADDRESS;
+    const u32 suppliedAddress =
+        Dynarmic_current_user_callbacks()->MemoryRead32(guest_address);
+    if (anywhere) {
+        // Sometimes the address pointer will contain garbage value, change it to 0
+        Dynarmic_current_user_callbacks()->MemoryWrite32(
+            guest_address, 0);
     }
 
     if (size == 0) {
-        suppliedAddress = 0;
-        return write_guest_memory_with_permissions(
-                guest_address, &suppliedAddress,
-                sizeof(suppliedAddress), PROT_WRITE)
-            ? KERN_SUCCESS : KERN_INVALID_ADDRESS;
+        Dynarmic_current_user_callbacks()->MemoryWrite32(
+            guest_address, 0);
+        return KERN_SUCCESS;
     }
     if (size > UINT64_MAX - DYN_PAGE_MASK) {
         return KERN_NO_SPACE;
@@ -4845,14 +4559,12 @@ kern_return_t guest__kernelrpc_mach_vm_allocate_trap(u32 target, u32 guest_addre
 
     const u64 allocationSize =
         (size + DYN_PAGE_MASK) & ~u64(DYN_PAGE_MASK);
-    const u64 requestedAddress64 = anywhere ? 0 :
-        suppliedAddress & ~u64(DYN_PAGE_MASK);
+    const u32 requestedAddress = anywhere ? 0 :
+        suppliedAddress & ~u32(DYN_PAGE_MASK);
     if (!GuestAddressRangeIsValid32(
-            requestedAddress64, allocationSize)) {
+            requestedAddress, allocationSize)) {
         return KERN_NO_SPACE;
     }
-    const u32 requestedAddress =
-        static_cast<u32>(requestedAddress64);
 
     u32 result;
     if (!anywhere && !overwrite) {
@@ -4871,86 +4583,21 @@ kern_return_t guest__kernelrpc_mach_vm_allocate_trap(u32 target, u32 guest_addre
             requestedAddress, allocationSize,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
-            -1, 0, DYN_PAGE_MASK,
-            (flags & VM_FLAGS_PURGABLE) != 0);
+            -1, 0);
     } else {
         result = Dynarmic_mmap(
             requestedAddress, allocationSize,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS |
                 (anywhere ? 0 : MAP_FIXED),
-            -1, 0, DYN_PAGE_MASK,
-            (flags & VM_FLAGS_PURGABLE) != 0);
+            -1, 0);
     }
     if (result == -1) {
         return KERN_NO_SPACE;
     }
-    const uint64_t resultAddress = result;
-    return write_guest_memory_with_permissions(
-            guest_address, &resultAddress,
-            sizeof(resultAddress), PROT_WRITE)
-        ? KERN_SUCCESS : KERN_INVALID_ADDRESS;
-}
-
-kern_return_t guest__kernelrpc_mach_vm_purgable_control_trap(
-        mach_port_name_t target, mach_vm_offset_t guest_address,
-        vm_purgable_t control, u32 guest_state) {
-    if (target != mach_task_self()) {
-        return MACH_SEND_INVALID_DEST;
-    }
-
-    int state = 0;
-    if (!read_guest_memory_with_permissions(
-            guest_state, &state, sizeof(state), PROT_READ)) {
-        return KERN_INVALID_ADDRESS;
-    }
-    if (control != VM_PURGABLE_SET_STATE &&
-            control != VM_PURGABLE_GET_STATE &&
-            control != VM_PURGABLE_PURGE_ALL) {
-        return KERN_INVALID_ARGUMENT;
-    }
-
-    kern_return_t result = KERN_FAILURE;
-    if (control == VM_PURGABLE_PURGE_ALL) {
-        /* XNU ignores the address for this process-wide operation.  In
-         * particular, callers are permitted to pass zero or a value that is
-         * not a mapped guest address. */
-        result = _kernelrpc_mach_vm_purgable_control_trap(
-            mach_task_self(), 0, control, &state);
-    } else {
-        if (guest_address > UINT32_MAX) {
-            return KERN_INVALID_ADDRESS;
-        }
-
-        std::lock_guard<std::recursive_mutex> lock(guestVmMutex);
-        const u64 guestPageAddress =
-            guest_address & ~u64(DYN_PAGE_MASK);
-        khash_t(memory) *memory = sharedHandle.memory;
-        if (memory == nullptr) {
-            return KERN_INVALID_ADDRESS;
-        }
-        const khiter_t iterator = kh_get(
-            memory, memory, guestPageAddress);
-        if (iterator == kh_end(memory)) {
-            return KERN_INVALID_ADDRESS;
-        }
-        const t_memory_page page = kh_value(memory, iterator);
-        if (page == nullptr || page->addr == nullptr) {
-            return KERN_INVALID_ADDRESS;
-        }
-
-        const mach_vm_address_t hostAddress =
-            reinterpret_cast<mach_vm_address_t>(page->addr) +
-            (guest_address & DYN_PAGE_MASK);
-        result = _kernelrpc_mach_vm_purgable_control_trap(
-            mach_task_self(), hostAddress, control, &state);
-    }
-    if (result == KERN_SUCCESS &&
-            !write_guest_memory_with_permissions(
-                guest_state, &state, sizeof(state), PROT_WRITE)) {
-        result = KERN_INVALID_ADDRESS;
-    }
-    return result;
+    Dynarmic_current_user_callbacks()->MemoryWrite32(
+        guest_address, result);
+    return KERN_SUCCESS;
 }
 
 kern_return_t guest__kernelrpc_mach_port_construct_trap(mach_port_name_t target, u32 guest_options, u64 context, u32 guest_name) {
@@ -4976,37 +4623,20 @@ kern_return_t guest__kernelrpc_mach_vm_map_trap(mach_port_name_t target, u32 gue
     if (target != mach_task_self()) {
         return KERN_FAILURE;
     }
-    uint64_t suppliedAddress = 0;
-    if (!read_guest_memory_with_permissions(
-            guest_address, &suppliedAddress,
-            sizeof(suppliedAddress), PROT_READ)) {
-        return KERN_INVALID_ADDRESS;
-    }
-
-    const bool anywhere = (flags & VM_FLAGS_ANYWHERE) != 0;
+    bool anywhere = (flags & VM_FLAGS_ANYWHERE) != 0;
     if (!anywhere) {
         printf("LC32: BackendException: _kernelrpc_mach_vm_map_trap fixed\n");
         return KERN_FAILURE;
     }
-    /* VM_FLAGS_ANYWHERE ignores the in/out address's initial value, but the
-     * full mach_vm_offset_t still has to be copied in to validate its guest
-     * memory range. */
-    suppliedAddress = 0;
     u32 result = Dynarmic_mmap(
-        static_cast<u32>(suppliedAddress),
+        Dynarmic_current_user_callbacks()->MemoryRead32(guest_address),
         size, cur_protection, MAP_PRIVATE | MAP_ANONYMOUS,
-        -1, 0, mask ?: DYN_PAGE_MASK,
-        (flags & VM_FLAGS_PURGABLE) != 0);
+        -1, 0, mask ?: DYN_PAGE_MASK);
     if (result == -1) {
         return KERN_NO_SPACE;
     }
-    const uint64_t resultAddress = result;
-    if (!write_guest_memory_with_permissions(
-            guest_address, &resultAddress,
-            sizeof(resultAddress), PROT_WRITE)) {
-        (void)Dynarmic_munmap(result, size);
-        return KERN_INVALID_ADDRESS;
-    }
+    Dynarmic_current_user_callbacks()->MemoryWrite32(
+        guest_address, result);
     return KERN_SUCCESS;
 }
 
