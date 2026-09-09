@@ -219,6 +219,8 @@ $(eval $(call lc32_guest_test,lc32-string-format,string_format.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-string-get-bytes,string_get_bytes.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-string-range,string_range.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-thread-modes,thread_modes.m,Foundation))
+$(eval $(call lc32_test,lc32-thread-policy,thread_policy.c,))
+$(eval $(call lc32_test,lc32-mach-simple-rpc,mach_simple_rpc.c,))
 $(eval $(call lc32_guest_test,lc32-thread-perform,thread_perform.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-thread-suspend-hostcall,thread_suspend_hostcall.m,Foundation))
 

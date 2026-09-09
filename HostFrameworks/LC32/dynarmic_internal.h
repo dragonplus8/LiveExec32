@@ -39,7 +39,9 @@
 #include <mach/mach_time.h>
 #include <mach/mig_errors.h>
 #include <mach/task_info.h>
+#include <mach/task_policy.h>
 #include <mach/thread_act.h>
+#include <mach/thread_policy.h>
 #include <mach/vm_map.h>
 #include <mach/vm_page_size.h>
 #include <mach/vm_region.h>
@@ -361,6 +363,13 @@ kern_return_t CopyGuestThreadInfo(
     mach_port_t target, thread_flavor_t flavor,
     mach_msg_type_number_t capacity, integer_t *info,
     mach_msg_type_number_t *count);
+kern_return_t SetGuestThreadPolicy(
+    mach_port_t target, thread_policy_flavor_t flavor,
+    const integer_t *info, mach_msg_type_number_t count);
+kern_return_t CopyGuestThreadPolicy(
+    mach_port_t target, thread_policy_flavor_t flavor,
+    mach_msg_type_number_t capacity, integer_t *info,
+    mach_msg_type_number_t *count, boolean_t *getDefault);
 
 template <typename Function>
 auto InvokeNativeGuestHostCall(Function &&function)
@@ -763,6 +772,19 @@ struct NativeGuestJit {
     mach_port_t joinSemaphore = MACH_PORT_NULL;
 };
 
+/* Logical scheduling requests never change the host UI/emulator pthread's
+ * scheduling mode. Access these values under the owning registry mutex. */
+struct GuestThreadPolicyState {
+    boolean_t timeshare = TRUE;
+    bool realtimeActive = false;
+    thread_time_constraint_policy_data_t realtime = {};
+    integer_t importance = 0;
+    integer_t affinityTag = THREAD_AFFINITY_TAG_NULL;
+    integer_t backgroundPriority = 0;
+    integer_t latencyQos = LATENCY_QOS_TIER_UNSPECIFIED;
+    integer_t throughputQos = THROUGHPUT_QOS_TIER_UNSPECIFIED;
+};
+
 struct GuestThreadContext {
     gdb_thread_id_t debuggerId = 0;
     u64 threadSelfId = 0;
@@ -790,6 +812,7 @@ struct GuestThreadContext {
     bool runnable = false;
     bool workqueue = false;
     NativeGuestJit *nativeJit = nullptr;
+    GuestThreadPolicyState policy;
 };
 
 enum class NativeDebuggerRunState : uint8_t {

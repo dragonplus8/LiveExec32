@@ -1,6 +1,7 @@
 #include "dynarmic_internal.h"
 #include "dynarmic_syscalls.h"
 #include "darwin_file_syscalls.h"
+#include "guest_mach_messages.h"
 
 #include <poll.h>
 
@@ -775,6 +776,10 @@ guest_mach_msg_trap(u32 guest_msg,
     }
 
     LC32_DEBUG_PRINTF("LC32: mach_msg_trap id %d\n", host_header->msgh_id);
+
+    /* ipc_kmsg copy-in supplies the size from the trap argument, not from
+     * the user header. Generated MIG clients may leave msgh_size unset. */
+    host_header->msgh_size = send_size;
 
     // pre-process reply header
     const mach_msg_bits_t request_bits = host_header->msgh_bits;
@@ -1897,6 +1902,100 @@ guest_mach_msg_trap(u32 guest_msg,
             Mess->Out.RetCode = KERN_SUCCESS;
             break;
         }
+        case 3617: // thread_policy_set
+        case 3618: { // thread_policy_get
+            /* iOS 10 uses an inline array of 32-bit integers. In a get
+             * reply the trailing get_default follows the actual array, not
+             * the maximum array in the generated MIG structure. */
+            struct __attribute__((packed, aligned(4))) ThreadPolicyPrefix32 {
+                mach_msg_header_t Head;
+                NDR_record_t NDR;
+                thread_policy_flavor_t flavor;
+                mach_msg_type_number_t count;
+            };
+            static_assert(sizeof(ThreadPolicyPrefix32) == 40,
+                "unexpected ARM32 thread policy request layout");
+            constexpr mach_msg_type_number_t MaximumPolicyCount = 16;
+            const bool setting = host_header->msgh_id == 3617;
+            const auto writeError = [&](kern_return_t errorCode) {
+                host_header->msgh_size = sizeof(mig_reply_error_t);
+                if(rcv_size < sizeof(mig_reply_error_t)) {
+                    result = MACH_RCV_TOO_LARGE;
+                    return;
+                }
+                auto *reply = reinterpret_cast<mig_reply_error_t *>(host_msg);
+                reply->NDR = NDR_record;
+                reply->RetCode = errorCode;
+            };
+            if(send_size < sizeof(ThreadPolicyPrefix32) ||
+                    (request_bits & MACH_MSGH_BITS_COMPLEX)) {
+                writeError(MIG_BAD_ARGUMENTS);
+                break;
+            }
+            ThreadPolicyPrefix32 request;
+            memcpy(&request, host_msg, sizeof(request));
+            if(request.Head.msgh_size != send_size ||
+                    memcmp(&request.NDR, &NDR_record, sizeof(NDR_record)) != 0) {
+                writeError(MIG_BAD_ARGUMENTS);
+                break;
+            }
+            if(request.count > MaximumPolicyCount) {
+                writeError(MIG_ARRAY_TOO_LARGE);
+                break;
+            }
+            const mach_msg_size_t requestSize = sizeof(request) +
+                (setting ? request.count * sizeof(integer_t)
+                         : sizeof(boolean_t));
+            if(send_size != requestSize) {
+                writeError(MIG_BAD_ARGUMENTS);
+                break;
+            }
+            if(rcv_size < sizeof(mig_reply_error_t)) {
+                writeError(KERN_SUCCESS);
+                break;
+            }
+
+            std::array<integer_t, MaximumPolicyCount> policy = {};
+            if(setting) {
+                if(request.count) memcpy(policy.data(), host_msg + sizeof(request),
+                    request.count * sizeof(integer_t));
+                /* A synthetic guest port is not a kernel thread port.
+                 * Retain the guest's hints without promoting the shared
+                 * emulator/UI pthread to a real-time scheduling policy. */
+                writeError(SetGuestThreadPolicy(request.Head.msgh_request_port,
+                    request.flavor, policy.data(), request.count));
+                break;
+            }
+
+            boolean_t getDefault;
+            memcpy(&getDefault, host_msg + sizeof(request), sizeof(getDefault));
+            mach_msg_type_number_t count = request.count;
+            const kern_return_t kr = CopyGuestThreadPolicy(
+                request.Head.msgh_request_port, request.flavor, request.count,
+                policy.data(), &count, &getDefault);
+            if(kr != KERN_SUCCESS || count > request.count ||
+                    count > MaximumPolicyCount) {
+                writeError(kr != KERN_SUCCESS ? kr : MIG_ARRAY_TOO_LARGE);
+                break;
+            }
+            const mach_msg_size_t replySize = sizeof(mig_reply_error_t) +
+                sizeof(count) + count * sizeof(integer_t) + sizeof(getDefault);
+            host_header->msgh_size = replySize;
+            if(rcv_size < replySize) {
+                result = MACH_RCV_TOO_LARGE;
+                break;
+            }
+            auto *reply = reinterpret_cast<mig_reply_error_t *>(host_msg);
+            reply->NDR = NDR_record;
+            reply->RetCode = KERN_SUCCESS;
+            char *payload = host_msg + sizeof(*reply);
+            memcpy(payload, &count, sizeof(count));
+            payload += sizeof(count);
+            if(count) memcpy(payload, policy.data(), count * sizeof(integer_t));
+            payload += count * sizeof(integer_t);
+            memcpy(payload, &getDefault, sizeof(getDefault));
+            break;
+        }
         case 3616: { // thread_policy
             MACH_MSG_UNION(thread_policy, Mess);
             /*
@@ -2064,6 +2163,8 @@ guest_mach_msg_trap(u32 guest_msg,
             return result;
         }
         default:
+            if(HandleGuestSimpleMachMessage(host_header, send_size, rcv_size,
+                    request_bits, &result)) break;
             printf("LC32: Unhandled msgh_id %d\n",
                 host_header->msgh_id);
             SetPendingGuestCrashMessage(

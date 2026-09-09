@@ -1486,6 +1486,199 @@ kern_return_t CopyGuestThreadState(
     return KERN_SUCCESS;
 }
 
+static GuestThreadPolicyState &CooperativeWorkqueuePolicyLocked() {
+    static mach_port_t port = MACH_PORT_NULL;
+    static u64 threadSelfId = 0;
+    static GuestThreadPolicyState policy;
+    if(port != guestWorkqueueThreadPort ||
+            threadSelfId != guestWorkqueueThreadSelfId) {
+        policy = {};
+        port = guestWorkqueueThreadPort;
+        threadSelfId = guestWorkqueueThreadSelfId;
+    }
+    return policy;
+}
+
+template <typename Function>
+static kern_return_t WithGuestThreadPolicy(
+        mach_port_t target, Function &&function) {
+    if(!MACH_PORT_VALID(target)) return KERN_INVALID_ARGUMENT;
+    EnsureGuestThreadRegistry();
+    const mach_port_t cooperativeMainPort = !NativeGuestThreadsEnabled()
+        ? pthread_mach_thread_np(pthread_self()) : MACH_PORT_NULL;
+    {
+        std::lock_guard<std::recursive_mutex> lock(guestThreadMutex);
+        for(GuestThreadContext &thread : guestThreads) {
+            if(thread.alive && (thread.threadPort == target ||
+                    (thread.debuggerId == 1 &&
+                     !MACH_PORT_VALID(thread.threadPort) &&
+                     target == cooperativeMainPort))) {
+                return function(thread.policy);
+            }
+        }
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock(guestWorkqueueMutex);
+        if(guestWorkqueueUpcallActive &&
+                MACH_PORT_VALID(guestWorkqueueThreadPort) &&
+                target == guestWorkqueueThreadPort) {
+            return function(CooperativeWorkqueuePolicyLocked());
+        }
+    }
+    return KERN_INVALID_ARGUMENT;
+}
+
+kern_return_t SetGuestThreadPolicy(
+        mach_port_t target, thread_policy_flavor_t flavor,
+        const integer_t *info, mach_msg_type_number_t count) {
+    if(count > 16 || (count != 0 && info == nullptr)) {
+        return KERN_INVALID_ARGUMENT;
+    }
+    return WithGuestThreadPolicy(target,
+        [&](GuestThreadPolicyState &policy) -> kern_return_t {
+        switch(flavor) {
+        case THREAD_EXTENDED_POLICY:
+            /* STANDARD is the same flavor with a zero-word payload. */
+            policy.timeshare = count == 0 || info[0] == TRUE;
+            policy.realtimeActive = false;
+            return KERN_SUCCESS;
+        case THREAD_TIME_CONSTRAINT_POLICY: {
+            if(count < THREAD_TIME_CONSTRAINT_POLICY_COUNT) {
+                return KERN_INVALID_ARGUMENT;
+            }
+            thread_time_constraint_policy_data_t requested;
+            memcpy(&requested, info, sizeof(requested));
+            mach_timebase_info_data_t timebase = {};
+            if(mach_timebase_info(&timebase) != KERN_SUCCESS ||
+                    !timebase.numer || !timebase.denom) return KERN_FAILURE;
+            /* XNU's accepted computation interval is 50us through 50ms,
+             * expressed in the same absolute-time units exposed to guests. */
+            const uint64_t minimum = 50000ULL * timebase.denom / timebase.numer;
+            const uint64_t maximum = 50000000ULL * timebase.denom / timebase.numer;
+            if(requested.computation == 0 ||
+                    requested.computation < minimum ||
+                    requested.computation > maximum ||
+                    requested.constraint < requested.computation) {
+                return KERN_INVALID_ARGUMENT;
+            }
+            policy.realtime = requested;
+            policy.realtimeActive = true;
+            return KERN_SUCCESS;
+        }
+        case THREAD_PRECEDENCE_POLICY:
+            if(count < THREAD_PRECEDENCE_POLICY_COUNT) return KERN_INVALID_ARGUMENT;
+            policy.importance = info[0];
+            return KERN_SUCCESS;
+        case THREAD_AFFINITY_POLICY:
+            if(count < THREAD_AFFINITY_POLICY_COUNT) return KERN_INVALID_ARGUMENT;
+            policy.affinityTag = info[0];
+            return KERN_SUCCESS;
+        case THREAD_BACKGROUND_POLICY:
+            if(count < THREAD_BACKGROUND_POLICY_COUNT) return KERN_INVALID_ARGUMENT;
+            policy.backgroundPriority = info[0] == THREAD_BACKGROUND_POLICY_DARWIN_BG
+                ? THREAD_BACKGROUND_POLICY_DARWIN_BG : 0;
+            return KERN_SUCCESS;
+        case THREAD_LATENCY_QOS_POLICY:
+            if(count < THREAD_LATENCY_QOS_POLICY_COUNT ||
+                    (info[0] != LATENCY_QOS_TIER_UNSPECIFIED &&
+                     (info[0] < LATENCY_QOS_TIER_0 || info[0] > LATENCY_QOS_TIER_5))) {
+                return KERN_INVALID_ARGUMENT;
+            }
+            policy.latencyQos = info[0];
+            return KERN_SUCCESS;
+        case THREAD_THROUGHPUT_QOS_POLICY:
+            if(count < THREAD_THROUGHPUT_QOS_POLICY_COUNT ||
+                    (info[0] != THROUGHPUT_QOS_TIER_UNSPECIFIED &&
+                     (info[0] < THROUGHPUT_QOS_TIER_0 ||
+                      info[0] > THROUGHPUT_QOS_TIER_5))) return KERN_INVALID_ARGUMENT;
+            policy.throughputQos = info[0];
+            return KERN_SUCCESS;
+        default:
+            return KERN_INVALID_ARGUMENT;
+        }
+    });
+}
+
+kern_return_t CopyGuestThreadPolicy(
+        mach_port_t target, thread_policy_flavor_t flavor,
+        mach_msg_type_number_t capacity, integer_t *info,
+        mach_msg_type_number_t *count, boolean_t *getDefault) {
+    if(capacity > 16 || (capacity != 0 && info == nullptr) ||
+            count == nullptr || getDefault == nullptr) return KERN_INVALID_ARGUMENT;
+    const bool requestedDefault = *getDefault != FALSE;
+    return WithGuestThreadPolicy(target,
+        [&](GuestThreadPolicyState &policy) -> kern_return_t {
+        boolean_t returnedDefault = requestedDefault;
+        integer_t value = 0;
+        switch(flavor) {
+        case THREAD_EXTENDED_POLICY:
+            returnedDefault = requestedDefault || policy.realtimeActive;
+            value = returnedDefault ? TRUE : policy.timeshare;
+            /* Zero-word STANDARD queries are legal, like zero-word sets. */
+            if(capacity == 0) {
+                *count = 0;
+                *getDefault = returnedDefault;
+                return KERN_SUCCESS;
+            }
+            break;
+        case THREAD_TIME_CONSTRAINT_POLICY: {
+            if(capacity < THREAD_TIME_CONSTRAINT_POLICY_COUNT) {
+                return KERN_INVALID_ARGUMENT;
+            }
+            thread_time_constraint_policy_data_t value = policy.realtime;
+            returnedDefault = requestedDefault || !policy.realtimeActive;
+            if(returnedDefault) {
+                /* Read only the host's machine-dependent DEFAULT quantum;
+                 * never query/apply a synthetic port as a native thread. */
+                static const auto defaults = [] {
+                    struct DefaultPolicy {
+                        thread_time_constraint_policy_data_t value = {};
+                        kern_return_t result = KERN_FAILURE;
+                    } result;
+                    mach_msg_type_number_t words = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+                    boolean_t useDefault = TRUE;
+                    result.result = thread_policy_get(
+                        pthread_mach_thread_np(pthread_self()),
+                        THREAD_TIME_CONSTRAINT_POLICY,
+                        reinterpret_cast<thread_policy_t>(&result.value),
+                        &words, &useDefault);
+                    if(result.result == KERN_SUCCESS &&
+                            (words != THREAD_TIME_CONSTRAINT_POLICY_COUNT ||
+                             !useDefault)) result.result = KERN_FAILURE;
+                    return result;
+                }();
+                if(defaults.result != KERN_SUCCESS) return defaults.result;
+                value = defaults.value;
+            }
+            memcpy(info, &value, sizeof(value));
+            *count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+            *getDefault = returnedDefault;
+            return KERN_SUCCESS;
+        }
+        case THREAD_PRECEDENCE_POLICY:
+            value = requestedDefault ? 0 : policy.importance;
+            break;
+        case THREAD_AFFINITY_POLICY:
+            value = requestedDefault ? THREAD_AFFINITY_TAG_NULL : policy.affinityTag;
+            break;
+        case THREAD_LATENCY_QOS_POLICY:
+            value = requestedDefault ? LATENCY_QOS_TIER_UNSPECIFIED : policy.latencyQos;
+            break;
+        case THREAD_THROUGHPUT_QOS_POLICY:
+            value = requestedDefault ? THROUGHPUT_QOS_TIER_UNSPECIFIED : policy.throughputQos;
+            break;
+        /* XNU exposes BACKGROUND through set, but has no matching get flavor. */
+        default:
+            return KERN_INVALID_ARGUMENT;
+        }
+        if(capacity < 1) return KERN_INVALID_ARGUMENT;
+        info[0] = value;
+        *count = 1;
+        *getDefault = returnedDefault;
+        return KERN_SUCCESS;
+    });
+}
+
 kern_return_t CopyGuestThreadInfo(
         mach_port_t target, thread_flavor_t flavor,
         mach_msg_type_number_t capacity, integer_t *info,
@@ -1497,13 +1690,15 @@ kern_return_t CopyGuestThreadInfo(
 
     const auto copyLogicalInfo = [=](
             u64 threadSelfId, u32 pthreadAddress,
-            bool runnable, uint32_t suspendCount) -> kern_return_t {
+            bool runnable, uint32_t suspendCount,
+            const GuestThreadPolicyState &policy) -> kern_return_t {
         if (flavor == THREAD_BASIC_INFO) {
             if (capacity < THREAD_BASIC_INFO_COUNT) {
                 return KERN_INVALID_ARGUMENT;
             }
             thread_basic_info_data_t basic = {};
-            basic.policy = POLICY_TIMESHARE;
+            basic.policy = policy.timeshare && !policy.realtimeActive
+                ? POLICY_TIMESHARE : POLICY_RR;
             basic.suspend_count = static_cast<integer_t>(suspendCount);
             basic.run_state = suspendCount != 0 ? TH_STATE_STOPPED
                 : runnable ? TH_STATE_RUNNING : TH_STATE_WAITING;
@@ -1566,7 +1761,7 @@ kern_return_t CopyGuestThreadInfo(
             }
             return copyLogicalInfo(
                 thread.threadSelfId, thread.pthreadAddress,
-                thread.runnable, suspendCount);
+                thread.runnable, suspendCount, thread.policy);
         }
     }
 
@@ -1578,7 +1773,8 @@ kern_return_t CopyGuestThreadInfo(
                 target == guestWorkqueueThreadPort) {
             return copyLogicalInfo(
                 guestWorkqueueThreadSelfId,
-                guestWorkqueuePthread, true, 0);
+                guestWorkqueuePthread, true, 0,
+                CooperativeWorkqueuePolicyLocked());
         }
     }
     return KERN_INVALID_ARGUMENT;
