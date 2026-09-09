@@ -3165,6 +3165,8 @@ u64 LC32InvokeHostSelector(u64 host_self, u64 host_cmd, u64 va_args) {
         } else if(selector == @selector(addSubview:)) {
             LC32UIKitScheduleLegacyOverlayLayout(
                 receiver, (id)(uintptr_t)args[0]);
+        } else if(selector == @selector(setAutoresizingMask:)) {
+            LC32UIKitDidSetGuestAutoresizingMask(receiver);
         }
         for(size_t index = 0; index < 9; index++) {
             if(sizedIndirectGuestStorage[index]) {

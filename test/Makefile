@@ -213,6 +213,7 @@ $(eval $(call lc32_guest_test,lc32-owned-create-copy,owned_create_copy.m,CoreFou
 $(eval $(call lc32_guest_test,lc32-ownership-publication-race,ownership_publication_race.m ownership_publication_race_weak.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-pointer-out-params,pointer_out_params.m,Foundation LC32))
 $(eval $(call lc32_guest_test,lc32-predicate-variadic,predicate_variadic.m,Foundation))
+$(eval $(call lc32_guest_test,lc32-property-list-serialization,property_list_serialization.m,Foundation CoreFoundation))
 $(eval $(call lc32_guest_test,lc32-string-bytes,string_bytes.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-string-format,string_format.m,Foundation))
 $(eval $(call lc32_guest_test,lc32-string-get-bytes,string_get_bytes.m,Foundation LC32))
@@ -245,6 +246,7 @@ $(eval $(call lc32_guest_test,lc32-uikit-legacy-device,uikit_legacy_device.m,Fou
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-overlay,uikit_legacy_overlay.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-root-geometry,uikit_legacy_root_geometry.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-nested-renderer,uikit_legacy_nested_renderer.m,Foundation UIKit QuartzCore CoreGraphics LC32))
+$(eval $(call lc32_guest_test,lc32-uikit-legacy-direct-renderer,uikit_legacy_direct_renderer.m,Foundation UIKit QuartzCore CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-orientation-startup,uikit_orientation_startup.m,Foundation UIKit LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-string-sizing,uikit_legacy_string_sizing.m,Foundation UIKit CoreGraphics LC32))
 $(eval $(call lc32_guest_test,lc32-uikit-legacy-window-root,uikit_legacy_window_root.m,Foundation UIKit CoreGraphics LC32))
@@ -284,6 +286,7 @@ lc32-corefoundation-url-common_CFLAGS := -fno-objc-arc
 lc32-corefoundation-write-stream_CFLAGS := -fno-objc-arc
 lc32-coretext-bridge_CFLAGS := -fno-objc-arc
 lc32-foundation-null-utf8_CFLAGS := -fno-objc-arc
+lc32-property-list-serialization_CFLAGS := -fno-objc-arc -Wno-deprecated-declarations
 lc32-uikit-legacy-window-root_CFLAGS := -fno-objc-arc -Wall -Wextra -Werror
 # Override Theos' clang target, which otherwise takes precedence over a
 # standalone -miphoneos-version-min flag and advertises SDK 10.3.
@@ -295,6 +298,10 @@ lc32-uikit-legacy-nested-renderer_USE_MODULES := 1
 lc32-uikit-legacy-nested-renderer_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0 \
 	-I$(abspath ../GuestFrameworks) -I$(abspath ../include)
 lc32-uikit-legacy-nested-renderer_LDFLAGS += -target armv7s-apple-ios7.0
+lc32-uikit-legacy-direct-renderer_USE_MODULES := 1
+lc32-uikit-legacy-direct-renderer_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0 \
+	-I$(abspath ../GuestFrameworks) -I$(abspath ../include)
+lc32-uikit-legacy-direct-renderer_LDFLAGS += -target armv7s-apple-ios7.0
 lc32-uikit-orientation-startup_CFLAGS := -fno-objc-arc -target armv7s-apple-ios7.0
 lc32-uikit-orientation-startup_LDFLAGS += -target armv7s-apple-ios7.0
 # Per-source flags follow Theos' DEBUG_CFLAGS, which otherwise restore -O0.

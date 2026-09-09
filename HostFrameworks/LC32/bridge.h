@@ -115,5 +115,6 @@ BOOL host_hook_getClass(const char *name, Class *outClass);
 void LC32UIKitPrepareGuestClass(Class cls);
 bool LC32UIKitGetViewDuringGuestLoad(id controller, id *view);
 void LC32UIKitScheduleLegacyOverlayLayout(id object, id addedSubview);
+void LC32UIKitDidSetGuestAutoresizingMask(id object);
 
 __END_DECLS

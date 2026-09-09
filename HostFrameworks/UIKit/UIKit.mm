@@ -63,6 +63,14 @@ typedef NS_ENUM(NSUInteger, LC32LegacyIPadGeometryMode) {
 @interface LC32LegacyWindowRootController : UIViewController
 @end
 
+@interface LC32LegacyRendererAutoresizingState : NSObject
+@property(nonatomic) UIViewAutoresizing originalMask;
+@property(nonatomic) BOOL yielded;
+@end
+
+@implementation LC32LegacyRendererAutoresizingState
+@end
+
 /*
 symbol = r0 + r1 << 32
 r0 = r2
@@ -92,6 +100,10 @@ const void *LC32LegacyWindowLayersLayoutPendingKey =
     &LC32LegacyWindowLayersLayoutPendingKey;
 const void *LC32LegacyRootlessWindowPlacementKey =
     &LC32LegacyRootlessWindowPlacementKey;
+const void *LC32LegacyRootlessRendererAutoresizingKey =
+    &LC32LegacyRootlessRendererAutoresizingKey;
+const void *LC32LegacyRootlessRendererAutoresizingStateKey =
+    &LC32LegacyRootlessRendererAutoresizingStateKey;
 const void *LC32LegacyOverlayLayoutPendingKey =
     &LC32LegacyOverlayLayoutPendingKey;
 const void *LC32LegacyRootWindowGeometryKey =
@@ -162,6 +174,13 @@ UIView *LC32NativeViewSuperview(UIView *view) {
     static Getter getter = reinterpret_cast<Getter>(
         class_getMethodImplementation(UIView.class, @selector(superview)));
     return view ? getter(view, @selector(superview)) : nil;
+}
+
+NSArray<UIView *> *LC32NativeViewSubviews(UIView *view) {
+    using Getter = NSArray<UIView *> *(*)(id, SEL);
+    static Getter getter = reinterpret_cast<Getter>(
+        class_getMethodImplementation(UIView.class, @selector(subviews)));
+    return view ? getter(view, @selector(subviews)) : nil;
 }
 
 UIWindow *LC32NativeViewWindow(UIView *view) {
@@ -242,6 +261,15 @@ void LC32NativeSetViewAutoresizingMask(
         class_getMethodImplementation(
             UIView.class, @selector(setAutoresizingMask:)));
     if(view) setter(view, @selector(setAutoresizingMask:), mask);
+}
+
+UIViewAutoresizing LC32NativeViewAutoresizingMask(UIView *view) {
+    using Getter = UIViewAutoresizing (*)(id, SEL);
+    static Getter getter = reinterpret_cast<Getter>(
+        class_getMethodImplementation(UIView.class,
+            @selector(autoresizingMask)));
+    return view ? getter(view, @selector(autoresizingMask))
+                : UIViewAutoresizingNone;
 }
 
 void LC32NativeSetViewNeedsLayout(UIView *view) {
@@ -679,6 +707,7 @@ bool LC32WindowNeedsLegacyPhoneCanvas(
 bool LC32WindowNeedsImmediateLegacyPhoneCanvas(
     UIWindow *window, UIViewController *controller);
 bool LC32FitLegacyDirectWindowLayers(UIWindow *window);
+void LC32RestoreRootlessRendererAutoresizing(UIWindow *window);
 bool LC32TransformNearlyEquals(
     CGAffineTransform left, CGAffineTransform right);
 UIInterfaceOrientation LC32LegacyRootWindowGeometry(
@@ -784,6 +813,9 @@ void LC32NativeSetWindowRootViewController(
         UIWindow *window, UIViewController *controller) {
     Class dispatchClass = LC32NativeWindowDispatchClass(window);
     if(!window || !dispatchClass) return;
+    if(![controller isKindOfClass:LC32LegacyWindowRootController.class]) {
+        LC32RestoreRootlessRendererAutoresizing(window);
+    }
     struct objc_super superInfo = {window, dispatchClass};
     using SetRootViewController =
         void (*)(struct objc_super *, SEL, UIViewController *);
@@ -1124,6 +1156,127 @@ bool LC32WindowUsesRootlessPhoneCanvas(UIWindow *window) {
             isKindOfClass:LC32LegacyWindowRootController.class];
 }
 
+void LC32RestoreRootlessRendererAutoresizing(UIWindow *window) {
+    NSMapTable<UIView *, LC32LegacyRendererAutoresizingState *> *saved =
+        objc_getAssociatedObject(
+            window, LC32LegacyRootlessRendererAutoresizingKey);
+    for(UIView *view in saved.keyEnumerator) {
+        LC32LegacyRendererAutoresizingState *state = [saved objectForKey:view];
+        if(objc_getAssociatedObject(view,
+                LC32LegacyRootlessRendererAutoresizingStateKey) != state) continue;
+        if(!state.yielded &&
+                LC32NativeViewAutoresizingMask(view) == UIViewAutoresizingNone) {
+            LC32NativeSetViewAutoresizingMask(view, state.originalMask);
+        }
+        objc_setAssociatedObject(view,
+            LC32LegacyRootlessRendererAutoresizingStateKey, nil,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    objc_setAssociatedObject(window, LC32LegacyRootlessRendererAutoresizingKey,
+        nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+void LC32PreserveRootlessRendererAutoresizing(
+        UIWindow *window, bool installingSyntheticRoot = false) {
+    if(!window || !window.guest_selfOrNull ||
+            LC32GetGuestExecutableSDKVersion() >= 0x80000 ||
+            !LC32GuestUsesFixedLandscapePhoneCanvas()) return;
+    UIViewController *root = LC32NativeWindowRootViewController(window);
+    if(installingSyntheticRoot ? root != nil
+            : ![root isKindOfClass:LC32LegacyWindowRootController.class]) return;
+
+    NSMapTable<UIView *, LC32LegacyRendererAutoresizingState *> *saved =
+        objc_getAssociatedObject(
+            window, LC32LegacyRootlessRendererAutoresizingKey);
+    bool alreadyPreserved = false;
+    for(UIView *view in saved.keyEnumerator) {
+        LC32LegacyRendererAutoresizingState *state = [saved objectForKey:view];
+        if(state.yielded || objc_getAssociatedObject(view,
+                LC32LegacyRootlessRendererAutoresizingStateKey) != state) continue;
+        if(LC32NativeViewAutoresizingMask(view) != UIViewAutoresizingNone) {
+            /* A later guest setting takes ownership. Remember that decision
+             * while this window remains rootless instead of freezing it again. */
+            state.yielded = YES;
+        } else if(LC32NativeViewSuperview(view) != window) {
+            LC32NativeSetViewAutoresizingMask(view, state.originalMask);
+            state.yielded = YES;
+            objc_setAssociatedObject(view,
+                LC32LegacyRootlessRendererAutoresizingStateKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        } else {
+            alreadyPreserved = true;
+        }
+    }
+    if(alreadyPreserved) return;
+
+    CALayer *windowLayer = LC32NativeViewLayer(window);
+    if(!windowLayer || LC32ObjectUsesGuestClass(windowLayer) ||
+            !LC32TransformNearlyEquals(LC32NativeViewTransform(window),
+                CGAffineTransformIdentity) ||
+            !CATransform3DIsIdentity(windowLayer.sublayerTransform)) return;
+    static Class rendererClass = NSClassFromString(@"CAEAGLLayer");
+    if(!rendererClass) return;
+    CALayer *renderer = nil;
+    unsigned remainingLayers = 1024;
+    for(CALayer *layer in windowLayer.sublayers) {
+        if(!LC32FindLegacyNestedPortraitRenderer(layer, rendererClass,
+                true, 0, remainingLayers, renderer)) return;
+    }
+    if(!renderer) return;
+
+    for(UIView *view in LC32NativeViewSubviews(window)) {
+        if(LC32NativeViewLayer(view) != renderer || !view.guest_selfOrNull ||
+                [saved objectForKey:view]) continue;
+        LC32LegacyRendererAutoresizingState *previous = objc_getAssociatedObject(
+            view, LC32LegacyRootlessRendererAutoresizingStateKey);
+        if(previous) {
+            /* A renderer can move to a different rootless window before its
+             * former window refits. Retire only that old preservation record;
+             * its later cleanup must not alter this window's new ownership. */
+            if(!previous.yielded &&
+                    LC32NativeViewAutoresizingMask(view) ==
+                        UIViewAutoresizingNone) {
+                LC32NativeSetViewAutoresizingMask(view, previous.originalMask);
+            }
+            previous.yielded = YES;
+            objc_setAssociatedObject(view,
+                LC32LegacyRootlessRendererAutoresizingStateKey, nil,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        const UIViewAutoresizing mask = LC32NativeViewAutoresizingMask(view);
+        if(!(mask & (UIViewAutoresizingFlexibleWidth |
+                     UIViewAutoresizingFlexibleHeight))) return;
+        if(!saved) {
+            /* Weak pointer-identity keys neither extend a removed renderer's
+             * lifetime nor call guest -hash/-isEqual: implementations. */
+            saved = [NSMapTable
+                mapTableWithKeyOptions:NSPointerFunctionsWeakMemory |
+                    NSPointerFunctionsObjectPointerPersonality
+                valueOptions:NSPointerFunctionsStrongMemory];
+            objc_setAssociatedObject(window,
+                LC32LegacyRootlessRendererAutoresizingKey, saved,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        LC32LegacyRendererAutoresizingState *state =
+            [LC32LegacyRendererAutoresizingState new];
+        state.originalMask = mask;
+        [saved setObject:state forKey:view];
+        objc_setAssociatedObject(view,
+            LC32LegacyRootlessRendererAutoresizingStateKey, state,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+#if !__has_feature(objc_arc)
+        [state release];
+#endif
+        /* The synthetic root makes modern UIWindow adopt scene-oriented
+         * bounds. A main-nib portrait drawable with flexible dimensions would
+         * otherwise be resized before our compositor can recognize it.
+         * Preserve only the proven direct renderer, without changing its
+         * bounds, center, descendants, or parent or forcing guest layout. */
+        LC32NativeSetViewAutoresizingMask(view, UIViewAutoresizingNone);
+        return;
+    }
+}
+
 struct LC32LegacyRootlessWindowPlacement {
     CGAffineTransform originalTransform;
     CGAffineTransform appliedTransform;
@@ -1254,6 +1407,8 @@ bool LC32FitLegacyDirectWindowLayers(UIWindow *window) {
     CALayer *windowLayer = LC32NativeViewLayer(window);
     UIViewController *nativeRoot = LC32NativeWindowRootViewController(window);
     const bool rootlessPhoneCanvas = LC32WindowUsesRootlessPhoneCanvas(window);
+    if(rootlessPhoneCanvas) LC32PreserveRootlessRendererAutoresizing(window);
+    else LC32RestoreRootlessRendererAutoresizing(window);
     const bool ownsWindowPlacement = LC32ReconcileRootlessWindowPlacement(
         window, windowLayer, !rootlessPhoneCanvas);
     if(!directRootState.boolValue && !rootlessPhoneCanvas) {
@@ -2122,6 +2277,8 @@ bool LC32InstallLegacyDirectSubviewRoot(UIWindow *window) {
     const NSUInteger existingSubviewCount = window.subviews.count;
     if(!existingSubviewCount) return false;
 
+    LC32PreserveRootlessRendererAutoresizing(window, true);
+
     UIViewController *controller =
         [[LC32LegacyWindowRootController alloc] initWithNibName:nil
                                                          bundle:nil];
@@ -2138,6 +2295,8 @@ bool LC32InstallLegacyDirectSubviewRoot(UIWindow *window) {
         fprintf(stderr,
             "LC32: installed legacy direct-view window root (%lu subviews)\n",
             (unsigned long)existingSubviewCount);
+    } else {
+        LC32RestoreRootlessRendererAutoresizing(window);
     }
 #if !__has_feature(objc_arc)
     [controller release];
@@ -2321,6 +2480,19 @@ void LC32AdoptLegacyPhoneCanvases(UIApplication *application) {
 
 } // namespace
 
+extern "C" void LC32UIKitDidSetGuestAutoresizingMask(id object) {
+    if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000 ||
+            ![object isKindOfClass:UIView.class]) return;
+    LC32LegacyRendererAutoresizingState *state = objc_getAssociatedObject(
+        object, LC32LegacyRootlessRendererAutoresizingStateKey);
+    if(state) {
+        /* This runs only after a guest setter, not our typed native setters.
+         * Even an explicit None after detachment relinquishes ownership of
+         * the frozen mask. The record retains neither its view nor window. */
+        state.yielded = YES;
+    }
+}
+
 extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
         id object, id addedSubview) {
     if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000) {
@@ -2330,6 +2502,9 @@ extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
         /* A selector with this name on an unrelated class need not take an
          * object argument. Inspect only the known-valid receiver first. */
         if(![object isKindOfClass:UIView.class]) return;
+        if([object isKindOfClass:UIWindow.class]) {
+            LC32PreserveRootlessRendererAutoresizing((UIWindow *)object);
+        }
         LC32ScheduleRootlessWindowLayerLayout(
             LC32NativeViewWindow((UIView *)object));
         if(![object isKindOfClass:UIWindow.class]) return;
@@ -2337,6 +2512,10 @@ extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
     }
     if(![object isKindOfClass:UIView.class]) return;
     UIView *view = (UIView *)object;
+    if([view isKindOfClass:UIWindow.class]) {
+        LC32ScheduleRootlessWindowLayerLayout((UIWindow *)view);
+        return;
+    }
     if(![LC32NativeViewSuperview(view) isKindOfClass:UIWindow.class]) return;
     const UIInterfaceOrientation rootOrientation =
         LC32LegacyRootWindowGeometry(view, true);
@@ -2372,6 +2551,14 @@ extern "C" bool LC32UIKitGetViewDuringGuestLoad(
 }
 
 @implementation LC32LegacyWindowRootController
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    /* Scene-driven window resizing can settle after makeKeyAndVisible.
+     * Refit presentation from this inert native root without laying out the
+     * guest renderer or intercepting ordinary guest view layout. */
+    LC32ScheduleRootlessWindowLayerLayout(LC32NativeViewWindow(self.view));
+}
 
 - (void)loadView {
     UIView *view = [[UIView alloc] initWithFrame:CGRectZero];
