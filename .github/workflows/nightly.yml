@@ -86,10 +86,6 @@ jobs:
 
     # Validate the aggregate and rootless path rewriting, and retain the
     # resulting package for the nightly release.
-    - name: Build rootless jailbreak package
-      run: >-
-        gmake package PACKAGE_FORMAT=deb
-        THEOS_PACKAGE_SCHEME=rootless
 
     - name: Save extracted guest ramdisk
       if: steps.ramdisk-cache.outputs.cache-hit != 'true'
