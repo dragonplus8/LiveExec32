@@ -141,6 +141,58 @@ const CFStringRef kCFURLIsExcludedFromBackupKey =
 const CFStringRef kCFURLFileDirectoryContents =
     CFSTR("kCFURLFileDirectoryContents");
 const CFStringRef kCFURLFileExists = CFSTR("kCFURLFileExists");
+NSString * const NSURLNameKey = @"NSURLNameKey";
+NSString * const NSURLLocalizedNameKey = @"NSURLLocalizedNameKey";
+NSString * const NSURLPathKey = @"NSURLPathKey";
+NSString * const NSURLIsRegularFileKey = @"NSURLIsRegularFileKey";
+NSString * const NSURLIsDirectoryKey = @"NSURLIsDirectoryKey";
+NSString * const NSURLIsSymbolicLinkKey = @"NSURLIsSymbolicLinkKey";
+NSString * const NSURLIsVolumeKey = @"NSURLIsVolumeKey";
+NSString * const NSURLIsPackageKey = @"NSURLIsPackageKey";
+NSString * const NSURLIsApplicationKey = @"NSURLIsApplicationKey";
+NSString * const NSURLApplicationIsScriptableKey =
+    @"NSURLApplicationIsScriptableKey";
+NSString * const NSURLIsSystemImmutableKey = @"NSURLIsSystemImmutableKey";
+NSString * const NSURLIsUserImmutableKey = @"NSURLIsUserImmutableKey";
+NSString * const NSURLIsHiddenKey = @"NSURLIsHiddenKey";
+NSString * const NSURLHasHiddenExtensionKey =
+    @"NSURLHasHiddenExtensionKey";
+NSString * const NSURLCreationDateKey = @"NSURLCreationDateKey";
+NSString * const NSURLContentAccessDateKey = @"NSURLContentAccessDateKey";
+NSString * const NSURLContentModificationDateKey =
+    @"NSURLContentModificationDateKey";
+NSString * const NSURLAttributeModificationDateKey =
+    @"NSURLAttributeModificationDateKey";
+NSString * const NSURLLinkCountKey = @"NSURLLinkCountKey";
+NSString * const NSURLParentDirectoryURLKey =
+    @"NSURLParentDirectoryURLKey";
+NSString * const NSURLVolumeURLKey = @"NSURLVolumeURLKey";
+NSString * const NSURLTypeIdentifierKey = @"NSURLTypeIdentifierKey";
+NSString * const NSURLLocalizedTypeDescriptionKey =
+    @"NSURLLocalizedTypeDescriptionKey";
+NSString * const NSURLLabelNumberKey = @"NSURLLabelNumberKey";
+NSString * const NSURLLabelColorKey = @"NSURLLabelColorKey";
+NSString * const NSURLLocalizedLabelKey = @"NSURLLocalizedLabelKey";
+NSString * const NSURLEffectiveIconKey = @"NSURLEffectiveIconKey";
+NSString * const NSURLCustomIconKey = @"NSURLCustomIconKey";
+NSString * const NSURLFileResourceIdentifierKey =
+    @"NSURLFileResourceIdentifierKey";
+NSString * const NSURLVolumeIdentifierKey = @"NSURLVolumeIdentifierKey";
+NSString * const NSURLPreferredIOBlockSizeKey =
+    @"NSURLPreferredIOBlockSizeKey";
+NSString * const NSURLIsReadableKey = @"NSURLIsReadableKey";
+NSString * const NSURLIsWritableKey = @"NSURLIsWritableKey";
+NSString * const NSURLIsExecutableKey = @"NSURLIsExecutableKey";
+NSString * const NSURLFileSecurityKey = @"NSURLFileSecurityKey";
+NSString * const NSURLIsMountTriggerKey = @"NSURLIsMountTriggerKey";
+NSString * const NSURLFileResourceTypeKey = @"NSURLFileResourceTypeKey";
+NSString * const NSURLFileSizeKey = @"NSURLFileSizeKey";
+NSString * const NSURLFileAllocatedSizeKey =
+    @"NSURLFileAllocatedSizeKey";
+NSString * const NSURLTotalFileSizeKey = @"NSURLTotalFileSizeKey";
+NSString * const NSURLTotalFileAllocatedSizeKey =
+    @"NSURLTotalFileAllocatedSizeKey";
+NSString * const NSURLIsAliasFileKey = @"NSURLIsAliasFileKey";
 
 /* Private keys consumed by the iOS 10 Security/IOKit dependency closure. */
 const CFStringRef _kCFBundlePackageTypeKey = CFSTR("CFBundlePackageType");
