@@ -130,6 +130,7 @@ typedef enum : uint32_t {
     LC32CoreGraphicsOpContextSetFontSize = 112,
     LC32CoreGraphicsOpContextSetTextDrawingMode = 113,
     LC32CoreGraphicsOpContextShowGlyphsAtPoint = 114,
+    LC32CoreGraphicsOpContextSetAlpha = 115,
 } LC32CoreGraphicsOpcode;
 
 #endif
