@@ -3320,6 +3320,9 @@ void LC32SetInvokeGuestFuncPtr(u32 dlsymFunc, u32 invokeFunc) {
 
 #pragma mark Host -> Guest functions
 
+// Defined in dynarmic.cpp; SYS_exit sets this before guest teardown begins.
+extern std::atomic<bool> guestProcessExitRequested;
+
 static u32 LC32CachedGuestSymbol(std::atomic<u32> &cache,
                                  const char *name) {
     u32 value = cache.load(std::memory_order_acquire);
@@ -3345,6 +3348,18 @@ static u32 LC32CachedGuestSelector(std::atomic<u32> &cache,
 }
 
 u64 LC32InvokeGuestC(u32 pc, bool ret64, int argc, u32 *args) {
+    // Host frameworks can still receive UIKit/timer/network callbacks after
+    // the 32-bit guest has called exit().  At that point its JIT/register
+    // state is being torn down and re-entering guest code can execute stale
+    // pointers (PlunderNauts hits this through a late rotation callback).
+    // SYS_exit sets guestProcessExitRequested before stopping guest JITs, so
+    // use that existing process-lifecycle flag as the common callback gate.
+    if(guestProcessExitRequested.load(std::memory_order_acquire)) {
+        fprintf(stderr,
+            "LC32: dropping guest callback after guest exit "
+            "(pc=0x%x)\n", pc);
+        return 0;
+    }
     if(threadHandle.jit == nullptr || threadHandle.cb == nullptr) {
         fprintf(stderr,
             "LC32: refusing guest callback on an unregistered host thread "
