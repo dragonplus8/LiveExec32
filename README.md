@@ -35,6 +35,52 @@ gmake
   with `gmake LC32_DEBUG_LOGS=0` (or plain `gmake`) to disable them again.
   Errors and actionable warnings remain enabled in both modes, and existing
   specialized runtime trace controls are unchanged.
+
+  The jailbreak injector normally floors the arm64 shim's SDK at iOS 11.
+  To experiment with the ARM32 app's original SDK instead, build the deb
+  with `gmake PACKAGE_FORMAT=deb LC32_PRESERVE_GUEST_SDK=1 package` (plus
+  your usual package-scheme/install options). The shim's minimum OS remains
+  iOS 11. This affects newly injected executables; it does not rewrite apps
+  that already contain an arm64 shim, or change LiveContainer's SDK override.
+  Missing/zero SDK values are preserved as zero. Rebuild without this flag
+  to restore the default for subsequent injections.
+  Pre-iOS-8 guests still get their legacy `HOME/LiveExec32.app` bundle alias
+  in LiveContainer, independently of UIKit compatibility mode. Its target
+  is relative to the selected guest container, so relocating LiveContainer's
+  outer container keeps it valid. Matching older absolute aliases are upgraded;
+  unrelated entries and the standalone installer's two-link layout are preserved.
+
+  Low-SDK execution remains experimental. The host supplies narrow UIKit
+  layout-policy compatibility for layout guides, text-effects and keyboard windows
+  without raising the process SDK. An opt-in native Simulator regression is
+  available with `sh test/uikit_legacy_sdk_layout.sh --device UDID --baseline`;
+  it tests actual SDK 0, 7, 8, 10.3, and 11 Mach-O variants, needs an already
+  booted Simulator, and installs/removes only its own temporary test apps.
+  Processes actually linked before iOS 8 use UIKit's native legacy rotation
+  and geometry instead of LiveExec32's adapters, avoiding a duplicate turn.
+  This checks the host process SDK, so modern LiveContainer hosts retain
+  the adapters even for old guests. To compare native UIKit geometry on
+  newer hosts, launch with `LC32_DISABLE_UIKIT_COMPATIBILITY=1` in the host
+  process environment. This disables the host and guest canvas, orientation,
+  and synthetic-root adaptations, but retains the low-SDK Auto Layout fixes,
+  missing-API wrappers, and bridge recursion protection. The setting is read
+  once at launch; restart without it to restore the SDK-based default.
+  Pre-iOS-11 processes also repair nonfinite preferred-font results from
+  CoreText's legacy text-style tables (including Vietnamese line metrics).
+  Valid fonts are unchanged. Broken results use their resolved native face
+  and a concrete descriptor; missing accessibility sizes fall back to the
+  largest normal legacy category, not the modern accessibility-size table.
+  This repair stays enabled when geometry compatibility is disabled and
+  does not change the process SDK or language preferences. Run the native
+  font regression with `sh test/uikit_legacy_font_metrics.sh --device UDID`.
+  On pre-iOS-8 hosts, native alerts also use matched modern presentation,
+  layout and animator paths so action sheets do not collapse or remove their
+  presenting view. The policy overrides are limited to the native methods
+  handling an alert; ordinary window rotation retains the original SDK's
+  behavior. These hooks install together only when the required native
+  methods are available. The font regression also checks text-field alerts,
+  titled/untitled action sheets, repeated animated/nonanimated dismissal,
+  presenter visibility and preservation of the native window policy.
 - Generate the guest Objective-C shims, then build the guest frameworks:
 ```bash
 gmake -C GuestMakefile generate-shims

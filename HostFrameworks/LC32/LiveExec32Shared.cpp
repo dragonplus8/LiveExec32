@@ -1035,6 +1035,8 @@ int LC32RunGuest(int argc, char* argv[], char* envp[]) {
      * meaningful value for early binaries rather than "not initialized". */
     guestExecutableSDKVersion = 0;
     u32 execAddr = Dynarmic_map_file(false, 0x11000000, execPath);
+    // Bundle discovery also needs the legacy HOME alias in LiveContainer,
+    // independently of the host SDK or UIKit's native compatibility mode.
     const int legacyLayoutError = LC32GuestBootstrap::EnsureLegacyBundleLayout(
         configuredGuestHome, execPath, guestExecutableSDKVersion);
     if(legacyLayoutError != 0) {

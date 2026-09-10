@@ -110,6 +110,9 @@ u32 guest_objc_getClass(const char *name);
 Class guest_objc_getClass_retHostClass(const char *name);
 u64 guest_objc_msgSend(int argc, u32 *args);
 BOOL host_hook_getClass(const char *name, Class *outClass);
+// Shared host/guest policy: native pre-iOS-8 processes use UIKit's compositor.
+// LC32_DISABLE_UIKIT_COMPATIBILITY=1 also disables adapters on modern hosts.
+u32 LC32UIKitLegacyCompatibilityEnabled(void);
 // Lets framework bridges add native compatibility entry points after all
 // guest methods have been mirrored but before the class is registered.
 void LC32UIKitPrepareGuestClass(Class cls);

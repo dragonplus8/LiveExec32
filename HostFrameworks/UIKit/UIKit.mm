@@ -11,6 +11,8 @@
 #include <atomic>
 #include <dispatch/dispatch.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef NS_ENUM(NSUInteger, LC32LegacyIPadGeometryMode) {
     /* Pre-root-controller applications and some early fixed-surface engines
@@ -813,7 +815,8 @@ void LC32NativeSetWindowRootViewController(
         UIWindow *window, UIViewController *controller) {
     Class dispatchClass = LC32NativeWindowDispatchClass(window);
     if(!window || !dispatchClass) return;
-    if(![controller isKindOfClass:LC32LegacyWindowRootController.class]) {
+    if(LC32UIKitLegacyCompatibilityEnabled() &&
+            ![controller isKindOfClass:LC32LegacyWindowRootController.class]) {
         LC32RestoreRootlessRendererAutoresizing(window);
     }
     struct objc_super superInfo = {window, dispatchClass};
@@ -2481,6 +2484,7 @@ void LC32AdoptLegacyPhoneCanvases(UIApplication *application) {
 } // namespace
 
 extern "C" void LC32UIKitDidSetGuestAutoresizingMask(id object) {
+    if(!LC32UIKitLegacyCompatibilityEnabled()) return;
     if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000 ||
             ![object isKindOfClass:UIView.class]) return;
     LC32LegacyRendererAutoresizingState *state = objc_getAssociatedObject(
@@ -2495,6 +2499,7 @@ extern "C" void LC32UIKitDidSetGuestAutoresizingMask(id object) {
 
 extern "C" void LC32UIKitScheduleLegacyOverlayLayout(
         id object, id addedSubview) {
+    if(!LC32UIKitLegacyCompatibilityEnabled()) return;
     if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000) {
         return;
     }
@@ -2975,13 +2980,18 @@ extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
 
     /* Preserve native and inherited -loadView implementations. A synthesized
      * class's own void trampoline is the only method which needs the legacy
-     * reentrancy guard; method_setImplementation retains its guest encoding. */
+     * reentrancy guard; method_setImplementation retains its guest encoding.
+     * Keep this bridge guard even when legacy UIKit adaptation is disabled:
+     * it only intercepts recursive guest -view reads while -loadView is active,
+     * without changing geometry, hierarchy, or orientation policy. */
     Method guestLoadView = LC32ClassOwnMethod(cls, @selector(loadView));
     if(guestLoadView && method_getImplementation(guestLoadView) ==
             (IMP)&LC32InvokeGuestSelector) {
         method_setImplementation(
             guestLoadView, (IMP)&LC32GuestLoadView);
     }
+
+    if(!LC32UIKitLegacyCompatibilityEnabled()) return;
 
     auto addNativeAdapter = ^(SEL selector, IMP implementation) {
         Method declaration = class_getInstanceMethod(
@@ -3049,6 +3059,7 @@ extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
  * shape even though the UIKit adapter only needs the orientation. */
 extern "C" u32 LC32UIKitHandleLegacyStatusBarOrientation(
         u32 orientationValue, u32, u32) {
+    if(!LC32UIKitLegacyCompatibilityEnabled()) return 0;
     const UIInterfaceOrientation orientation =
         (UIInterfaceOrientation)orientationValue;
     if(!LC32MaskForInterfaceOrientation(orientation)) return 0;
@@ -3081,6 +3092,8 @@ extern "C" u32 LC32UIKitHandleLegacyStatusBarOrientation(
 
 extern "C" u32 LC32UIKitGetLegacyControllerOrientation(
         u32 low, u32 high, u32) {
+    if(!LC32UIKitLegacyCompatibilityEnabled())
+        return UIInterfaceOrientationUnknown;
     if(!pthread_main_np() || LC32GetGuestExecutableSDKVersion() >= 0x80000)
         return UIInterfaceOrientationUnknown;
     /* Those canvases already have a distinct logical orientation contract;
@@ -3153,6 +3166,8 @@ extern "C" u32 LC32UIKitGetLegacyControllerOrientation(
 }
 
 extern "C" u32 LC32UIKitGetLegacyStatusBarOrientation(void) {
+    if(!LC32UIKitLegacyCompatibilityEnabled())
+        return (u32)UIInterfaceOrientationUnknown;
     const LC32GuestUIKitPolicy &policy = LC32GuestInterfacePolicy();
     if(LC32GuestUsesFixedLandscapePhoneCanvas()) {
         /* Keep the guest's projection orientation paired with the native
@@ -3212,6 +3227,7 @@ extern "C" u32 LC32UIKitGetLegacyStatusBarOrientation(void) {
 @implementation UIWindow (LC32LegacyRootViewController)
 
 + (void)load {
+    if(!LC32UIKitLegacyCompatibilityEnabled()) return;
     Method original = class_getInstanceMethod(self,
                                                @selector(makeKeyAndVisible));
     Method compatibility = class_getInstanceMethod(
@@ -3433,8 +3449,10 @@ int LC32_UIKit_UIApplicationMain(u32 r2, u32 r3, u32 sp) {
         return LC32RunDebuggerAwareMainRunLoop();
     }
     firstEntry = false;
-    LC32GuestOrientationStartupCallbackDepth = LC32GuestCallbackDepth();
-    LC32GuestOrientationStartupComplete.store(false, std::memory_order_release);
+    if(LC32UIKitLegacyCompatibilityEnabled()) {
+        LC32GuestOrientationStartupCallbackDepth = LC32GuestCallbackDepth();
+        LC32GuestOrientationStartupComplete.store(false, std::memory_order_release);
+    }
 
     int argc = r2;
     u32 guest_argv = r3;
@@ -3443,14 +3461,16 @@ int LC32_UIKit_UIApplicationMain(u32 r2, u32 r3, u32 sp) {
 
     NSLog(@"UIApplicationMain(%d, 0x%x, %@, %@)\n", argc, guest_argv, principalClassName, delegateClassName);
     static id launchObserver;
-    launchObserver = [NSNotificationCenter.defaultCenter
-        addObserverForName:UIApplicationDidFinishLaunchingNotification
-                    object:nil
-                     queue:nil
-                usingBlock:^(__unused NSNotification *notification) {
-        LC32AdoptLegacyRootViewControllers();
-        LC32FinishGuestOrientationStartupAfterLaunch();
-    }];
+    if(LC32UIKitLegacyCompatibilityEnabled()) {
+        launchObserver = [NSNotificationCenter.defaultCenter
+            addObserverForName:UIApplicationDidFinishLaunchingNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(__unused NSNotification *notification) {
+            LC32AdoptLegacyRootViewControllers();
+            LC32FinishGuestOrientationStartupAfterLaunch();
+        }];
+    }
     (void)launchObserver;
     char executableName[] = "exec";
     char *host_argv[] = {executableName, nullptr};
@@ -3656,11 +3676,15 @@ u32 LC32_UIKit_GetWindowRootViewController(
         u32 windowLow, u32 windowHigh, u32) {
     UIWindow *window = reinterpret_cast<UIWindow *>(static_cast<uintptr_t>(
         windowLow | (static_cast<u64>(windowHigh) << 32)));
-    NSNumber *legacyDirectRootState = objc_getAssociatedObject(
-        window, LC32HideLegacyDirectGuestWindowRootKey);
-    if(legacyDirectRootState.boolValue) return 0;
-    UIViewController *controller =
-        LC32GuestWindowRootViewController(window);
+    UIViewController *controller;
+    if(LC32UIKitLegacyCompatibilityEnabled()) {
+        NSNumber *legacyDirectRootState = objc_getAssociatedObject(
+            window, LC32HideLegacyDirectGuestWindowRootKey);
+        if(legacyDirectRootState.boolValue) return 0;
+        controller = LC32GuestWindowRootViewController(window);
+    } else {
+        controller = LC32NativeWindowRootViewController(window);
+    }
     if(!controller) return 0;
     u32 guestController = controller.guest_selfOrNull;
     if(!guestController && Dynarmic_guest_thread_is_registered()) {
@@ -3678,6 +3702,10 @@ void LC32_UIKit_SetWindowRootViewController(
     UIViewController *controller = reinterpret_cast<UIViewController *>(
         static_cast<uintptr_t>(controllerAddress));
     if(!window) return;
+    if(!LC32UIKitLegacyCompatibilityEnabled()) {
+        LC32NativeSetWindowRootViewController(window, controller);
+        return;
+    }
 
     const bool suppressGuestCallbacks = !pthread_main_np();
     dispatch_block_t setRoot = ^{

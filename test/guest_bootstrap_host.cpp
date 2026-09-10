@@ -131,6 +131,19 @@ struct BundleLayoutFixture {
         CHECK(symlink(target.c_str(), path.c_str()) == 0);
         Track(path);
     }
+
+    bool MoveDirectory(const std::string &from, const std::string &to) {
+        const int result = rename(from.c_str(), to.c_str());
+        CHECK(result == 0);
+        if(result != 0) return false;
+        for(auto &entry : cleanup) {
+            if(entry.first == from ||
+                    entry.first.compare(0, from.size() + 1, from + "/") == 0) {
+                entry.first.replace(0, from.size(), to);
+            }
+        }
+        return true;
+    }
 };
 
 std::string ReadLink(const std::string &path) {
@@ -182,7 +195,7 @@ void TestLegacyBundleLayout() {
         fixture.Track(fixture.alias);
         CHECK(EnsureLegacyBundleLayout(
             fixture.home, fixture.executable, 0x00070000) == 0);
-        CHECK(ReadLink(fixture.alias) == fixture.bundle);
+        CHECK(ReadLink(fixture.alias) == "../Game.app");
         struct stat original = {};
         CHECK(lstat(fixture.alias.c_str(), &original) == 0);
         CHECK(EnsureLegacyBundleLayout(
@@ -191,6 +204,14 @@ void TestLegacyBundleLayout() {
         CHECK(lstat(fixture.alias.c_str(), &repeated) == 0);
         CHECK(S_ISLNK(repeated.st_mode));
         CHECK(original.st_ino == repeated.st_ino);
+    }
+    {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        fixture.MakeLink(fixture.bundle, fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(
+            fixture.home, fixture.executable, 0) == 0);
+        CHECK(ReadLink(fixture.alias) == "../Game.app");
     }
     {
         BundleLayoutFixture fixture;
@@ -262,6 +283,81 @@ void TestLegacyBundleLayout() {
             fixture.root, fixture.executable, 0) == 0);
         CHECK(!EntryExists(fixture.root + "/" +
             LC32GuestBootstrap::LegacyBundleAliasName));
+    }
+}
+
+void TestLiveContainerRelativeBundleLayout() {
+    using LC32GuestBootstrap::EnsureLegacyBundleLayout;
+    using LC32GuestBootstrap::SelectConfiguredHomeDirectory;
+    BundleLayoutFixture fixture;
+    if(fixture.root.empty()) return;
+    const std::string container = fixture.root + "/Container";
+    const std::string home = container + "/Data/Application/Selected";
+    const std::string bundle = container + "/Documents/Applications/Game.app";
+    const std::string alias = home + "/" + LC32GuestBootstrap::LegacyBundleAliasName;
+    for(const char *directory : {"", "/Data", "/Data/Application",
+            "/Data/Application/Selected", "/Documents", "/Documents/Applications",
+            "/Documents/Applications/Game.app"}) {
+        fixture.MakeDirectory(container + directory);
+    }
+    fixture.MakeFile(bundle + "/Info.plist");
+    fixture.MakeFile(bundle + "/Game");
+    fixture.Track(alias);
+
+    // Different aliases of the common ancestor must not add spurious ".."
+    // components. LiveContainer's HOME selects the guest container, not LC_HOME_PATH.
+    const std::string containerAlias = fixture.root + "/ContainerAlias";
+    fixture.MakeLink(container, containerAlias);
+    const std::string homeSpelling = containerAlias + "/Data/Application/Selected";
+    const std::string selected = SelectConfiguredHomeDirectory(
+        nullptr, container.c_str(), homeSpelling.c_str());
+    CHECK(selected == homeSpelling);
+    CHECK(EnsureLegacyBundleLayout(selected, bundle + "/Game", 0) == 0);
+    CHECK(ReadLink(alias) == "../../../Documents/Applications/Game.app");
+    CHECK(!EntryExists(container + "/" + LC32GuestBootstrap::LegacyBundleAliasName));
+
+    // Reinstalling/moving the whole outer container must not break this link.
+    const std::string moved = fixture.root + "/MovedContainer";
+    if(!fixture.MoveDirectory(container, moved)) return;
+    const std::string movedHome = moved + "/Data/Application/Selected";
+    const std::string movedBundle = moved + "/Documents/Applications/Game.app";
+    const std::string movedAlias = movedHome + "/" + LC32GuestBootstrap::LegacyBundleAliasName;
+    struct stat followed = {}, expected = {}, original = {}, repeated = {};
+    CHECK(stat(movedAlias.c_str(), &followed) == 0);
+    CHECK(stat(movedBundle.c_str(), &expected) == 0);
+    CHECK(followed.st_dev == expected.st_dev && followed.st_ino == expected.st_ino);
+    CHECK(lstat(movedAlias.c_str(), &original) == 0);
+    CHECK(EnsureLegacyBundleLayout(movedHome, movedBundle + "/Game", 0x70000) == 0);
+    CHECK(lstat(movedAlias.c_str(), &repeated) == 0);
+    CHECK(original.st_ino == repeated.st_ino);
+
+    // A simulator's explicitly shortened HOME symlink is resolved first.
+    const std::string shortHome = fixture.root + "/ShortHome";
+    fixture.MakeLink(movedHome, shortHome);
+    CHECK(EnsureLegacyBundleLayout(SelectConfiguredHomeDirectory(
+        nullptr, moved.c_str(), shortHome.c_str(), true),
+        movedBundle + "/Game", 0) == 0);
+    CHECK(ReadLink(movedAlias) == "../../../Documents/Applications/Game.app");
+}
+
+void TestRelativeBundleComponents() {
+    using LC32GuestBootstrap::EnsureLegacyBundleLayout;
+    for(bool descendant : {false, true}) {
+        BundleLayoutFixture fixture;
+        if(fixture.root.empty()) return;
+        const std::string bundle = descendant ? fixture.home + "/Game.app" :
+            fixture.root + "/HomeGame.app";
+        fixture.MakeDirectory(bundle);
+        fixture.MakeFile(bundle + "/Info.plist");
+        fixture.MakeFile(bundle + "/Game");
+        fixture.Track(fixture.alias);
+        CHECK(EnsureLegacyBundleLayout(fixture.home, bundle + "/Game", 0) == 0);
+        if(descendant) {
+            // Already at the original pre-iOS-8 location; no duplicate alias.
+            CHECK(!EntryExists(fixture.alias));
+        } else {
+            CHECK(ReadLink(fixture.alias) == "../HomeGame.app");
+        }
     }
 }
 
@@ -691,6 +787,8 @@ int main() {
     TestConfiguredHomeDirectory();
     TestConfiguredHomeResolution();
     TestLegacyBundleLayout();
+    TestLiveContainerRelativeBundleLayout();
+    TestRelativeBundleComponents();
     TestManagedLegacyBundleLayout();
     TestEnvironmentSelection();
     TestEnvironmentFinalization();

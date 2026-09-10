@@ -51,6 +51,40 @@ bool IsManagedOuterAlias(int home) {
         memcmp(target, LegacyBundleManagedTarget, length) == 0;
 }
 
+int ReplaceExistingAlias(int directory, const char *name, const char *target,
+                         const struct stat &expected) {
+    // Stage in the validated directory, without following/deleting the old
+    // target. Refuse an entry replaced since the caller validated it.
+    char temporaryName[80];
+    bool temporaryCreated = false;
+    for(unsigned attempt = 0; attempt < 8; ++attempt) {
+        unsigned long long nonce = 0;
+        arc4random_buf(&nonce, sizeof(nonce));
+        snprintf(temporaryName, sizeof(temporaryName),
+            ".LiveExec32.app.%016llx.tmp", nonce);
+        if(symlinkat(target, directory, temporaryName) == 0) {
+            temporaryCreated = true;
+            break;
+        }
+        if(errno != EEXIST) return errno;
+    }
+    if(!temporaryCreated) return EEXIST;
+    int error = 0;
+    struct stat existing = {};
+    if(fstatat(directory, name, &existing,
+            AT_SYMLINK_NOFOLLOW) != 0) {
+        error = errno;
+    } else if(!S_ISLNK(existing.st_mode) ||
+            existing.st_dev != expected.st_dev ||
+            existing.st_ino != expected.st_ino) {
+        error = EEXIST;
+    } else if(renameat(directory, temporaryName, directory, name) != 0) {
+        error = errno;
+    }
+    if(error != 0) (void)unlinkat(directory, temporaryName, 0);
+    return error;
+}
+
 int UpdateManagedInnerAlias(int home, const char *resolvedBundle,
                            const struct stat &bundleMetadata) {
     DirectoryDescriptor documents{openat(home, "Documents",
@@ -74,36 +108,31 @@ int UpdateManagedInnerAlias(int home, const char *resolvedBundle,
             target.st_dev == bundleMetadata.st_dev &&
             target.st_ino == bundleMetadata.st_ino) return 0;
 
-    /* The exact outer-link convention designates this inner symlink as
-     * runtime-managed, even if an earlier bundle target is now missing or
-     * elsewhere. Never follow/delete its old target. Stage the new link in
-     * the same validated Documents directory, then atomically publish it. */
-    char temporaryName[80];
-    bool temporaryCreated = false;
-    for(unsigned attempt = 0; attempt < 8; ++attempt) {
-        unsigned long long nonce = 0;
-        arc4random_buf(&nonce, sizeof(nonce));
-        snprintf(temporaryName, sizeof(temporaryName),
-            ".LiveExec32.app.%016llx.tmp", nonce);
-        if(symlinkat(resolvedBundle, documents.value, temporaryName) == 0) {
-            temporaryCreated = true;
-            break;
-        }
-        if(errno != EEXIST) return errno;
+    // The exact outer-link convention owns this inner symlink, even if its
+    // earlier bundle target is now missing or elsewhere.
+    return ReplaceExistingAlias(documents.value, LegacyBundleInnerAliasName,
+        resolvedBundle, existing);
+}
+
+std::string RelativeBundleTarget(const char *resolvedHome,
+                                 const char *resolvedBundle) {
+    // Canonical paths avoid counting symlink aliases (including /var) as
+    // actual parent directories. Compare complete components, not prefixes.
+    const std::string home = std::string(resolvedHome) + "/";
+    const std::string bundle = std::string(resolvedBundle) + "/";
+    std::size_t common = 0;
+    for(std::size_t index = 0; index < home.size() && index < bundle.size() &&
+            home[index] == bundle[index]; ++index) {
+        if(home[index] == '/') common = index + 1;
     }
-    if(!temporaryCreated) return EEXIST;
-    int error = 0;
-    if(fstatat(documents.value, LegacyBundleInnerAliasName, &existing,
-            AT_SYMLINK_NOFOLLOW) != 0) {
-        error = errno;
-    } else if(!S_ISLNK(existing.st_mode)) {
-        error = EEXIST;
-    } else if(renameat(documents.value, temporaryName,
-                      documents.value, LegacyBundleInnerAliasName) != 0) {
-        error = errno;
+    std::string target;
+    for(std::size_t index = common; index < home.size(); ++index) {
+        if(home[index] == '/') target += "../";
     }
-    if(error != 0) (void)unlinkat(documents.value, temporaryName, 0);
-    return error;
+    target += bundle.substr(common);
+    if(target.empty()) return ".";
+    target.pop_back(); // Both component sequences end in a slash.
+    return target;
 }
 
 } // anonymous namespace
@@ -136,8 +165,8 @@ int EnsureLegacyBundleLayout(
         return 0;
     }
     char resolvedHome[PATH_MAX];
-    if(realpath(configuredHome.c_str(), resolvedHome) &&
-            resolvedHome[1] == '\0') return 0;
+    if(!realpath(configuredHome.c_str(), resolvedHome)) return errno;
+    if(resolvedHome[1] == '\0') return 0;
 
     const std::size_t slash = executablePath.find_last_of('/');
     const std::string bundlePath = executablePath.substr(0, slash);
@@ -189,6 +218,8 @@ int EnsureLegacyBundleLayout(
         return UpdateManagedInnerAlias(
             home.value, resolvedBundle, bundleMetadata);
     }
+    const std::string relativeTarget =
+        RelativeBundleTarget(resolvedHome, resolvedBundle);
     auto checkExistingAlias = [&]() {
         struct stat entry = {};
         if(fstatat(home.value, LegacyBundleAliasName, &entry,
@@ -196,9 +227,19 @@ int EnsureLegacyBundleLayout(
             return errno;
         }
         if(!S_ISLNK(entry.st_mode)) return EEXIST;
-        if(fstatat(home.value, LegacyBundleAliasName, &entry, 0) == 0 &&
-                entry.st_dev == bundleMetadata.st_dev &&
-                entry.st_ino == bundleMetadata.st_ino) {
+        struct stat target = {};
+        if(fstatat(home.value, LegacyBundleAliasName, &target, 0) == 0 &&
+                target.st_dev == bundleMetadata.st_dev &&
+                target.st_ino == bundleMetadata.st_ino) {
+            char firstCharacter;
+            if(readlinkat(home.value, LegacyBundleAliasName,
+                    &firstCharacter, sizeof(firstCharacter)) < 0) return errno;
+            // Migrate an older absolute alias only after confirming it still
+            // names this bundle. Other existing relative links stay intact.
+            if(firstCharacter == '/') {
+                return ReplaceExistingAlias(home.value, LegacyBundleAliasName,
+                    relativeTarget.c_str(), entry);
+            }
             return 0;
         }
         return EEXIST;
@@ -206,7 +247,7 @@ int EnsureLegacyBundleLayout(
 
     const int existingError = checkExistingAlias();
     if(existingError != ENOENT) return existingError;
-    if(symlinkat(resolvedBundle, home.value, LegacyBundleAliasName) == 0) {
+    if(symlinkat(relativeTarget.c_str(), home.value, LegacyBundleAliasName) == 0) {
         return 0;
     }
     // Another launch may have created the same alias after our lookup.

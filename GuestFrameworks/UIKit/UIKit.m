@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 
 #include "LC32LegacyCanvas.h"
+#include "LC32UIKitCompatibility.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -118,6 +119,8 @@ const CGFloat UIScrollViewDecelerationRateFast = 0.99f;
 NSRunLoopMode const UITrackingRunLoopMode = @"UITrackingRunLoopMode";
 
 static pthread_once_t LC32LegacyAdMobOnce = PTHREAD_ONCE_INIT;
+static pthread_once_t LC32LegacyCompatibilityOnce = PTHREAD_ONCE_INIT;
+static BOOL LC32LegacyCompatibilityEnabled = YES;
 static pthread_once_t LC32VoiceOverOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32HostUIAccessibilityIsVoiceOverRunning;
 static pthread_once_t LC32AccessibilityPostOnce = PTHREAD_ONCE_INIT;
@@ -130,6 +133,22 @@ static BOOL LC32LegacyIPadStatusBarHidden;
 static BOOL LC32LegacyPhoneCanvasRequired;
 static pthread_once_t LC32LegacyUniqueIdentifierOnce = PTHREAD_ONCE_INIT;
 static NSString *LC32LegacyUniqueIdentifierFallback;
+
+static void LC32ResolveLegacyCompatibility(void) {
+    const uint64_t getter = LC32Dlsym(
+        "LC32UIKitLegacyCompatibilityEnabled", YES);
+    /* Older hosts do not export the experiment switch. Preserve their
+     * existing behavior rather than silently disabling guest adaptations. */
+    if(getter) {
+        LC32LegacyCompatibilityEnabled = LC32InvokeHostCRet32(getter) != 0;
+    }
+}
+
+BOOL LC32GuestUIKitLegacyCompatibilityEnabled(void) {
+    pthread_once(&LC32LegacyCompatibilityOnce,
+        LC32ResolveLegacyCompatibility);
+    return LC32LegacyCompatibilityEnabled;
+}
 
 static void LC32ResolveLegacyUniqueIdentifierFallback(void) {
     static NSString *const preferenceKey =
@@ -167,6 +186,7 @@ static void LC32ResolveLegacyUniqueIdentifierFallback(void) {
 }
 
 static void LC32ResolveLegacyCanvas(void) {
+    if(!LC32GuestUIKitLegacyCompatibilityEnabled()) return;
     NSBundle *bundle = NSBundle.mainBundle;
     NSDictionary *info = bundle.infoDictionary;
     const uint64_t getter = LC32Dlsym(
@@ -220,6 +240,7 @@ static pthread_once_t LC32LegacyScreenCoordinatesOnce = PTHREAD_ONCE_INIT;
 static BOOL LC32UsesLegacyScreenCoordinates;
 
 static void LC32ResolveLegacyScreenCoordinates(void) {
+    if(!LC32GuestUIKitLegacyCompatibilityEnabled()) return;
     const uint64_t getter = LC32Dlsym(
         "LC32GetGuestExecutableSDKVersion", YES);
     const uint32_t sdkVersion = getter
@@ -574,9 +595,11 @@ void UIImageWriteToSavedPhotosAlbum(UIImage *image,
      * applications redundantly add it to the window immediately afterwards;
      * moving it out of LiveExec32's compatibility container would violate
      * UIKit's controller-parent invariant. */
-    UIViewController *rootController = self.rootViewController;
-    if(view && rootController.isViewLoaded &&
-            rootController.view == view && view.superview != self) return;
+    if(LC32GuestUIKitLegacyCompatibilityEnabled()) {
+        UIViewController *rootController = self.rootViewController;
+        if(view && rootController.isViewLoaded &&
+                rootController.view == view && view.superview != self) return;
+    }
     [super addSubview:view];
 }
 

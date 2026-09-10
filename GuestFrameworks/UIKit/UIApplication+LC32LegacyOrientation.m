@@ -4,12 +4,14 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include "LC32UIKitCompatibility.h"
 
 static pthread_once_t LC32LegacyOrientationOnce = PTHREAD_ONCE_INIT;
 static uint64_t LC32HostLegacyOrientation;
 static uint64_t LC32HostLegacyStatusBarOrientation;
 
 static void LC32ResolveLegacyOrientation(void) {
+    if(!LC32GuestUIKitLegacyCompatibilityEnabled()) return;
     LC32HostLegacyOrientation = LC32Dlsym(
         "LC32UIKitHandleLegacyStatusBarOrientation", YES);
     LC32HostLegacyStatusBarOrientation = LC32Dlsym(
