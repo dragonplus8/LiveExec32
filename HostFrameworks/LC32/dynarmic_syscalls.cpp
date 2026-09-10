@@ -4973,7 +4973,7 @@ kern_return_t guest__kernelrpc_mach_vm_allocate_trap(u32 target, u32 guest_addre
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
             -1, 0, DYN_PAGE_MASK,
-            (flags & VM_FLAGS_PURGABLE) != 0);
+            false /* compatibility: keep guest purgeable memory resident */);
     } else {
         result = Dynarmic_mmap(
             requestedAddress, allocationSize,
@@ -4981,7 +4981,7 @@ kern_return_t guest__kernelrpc_mach_vm_allocate_trap(u32 target, u32 guest_addre
             MAP_PRIVATE | MAP_ANONYMOUS |
                 (anywhere ? 0 : MAP_FIXED),
             -1, 0, DYN_PAGE_MASK,
-            (flags & VM_FLAGS_PURGABLE) != 0);
+            false /* compatibility: keep guest purgeable memory resident */);
     }
     if (result == -1) {
         return KERN_NO_SPACE;
@@ -5000,58 +5000,27 @@ kern_return_t guest__kernelrpc_mach_vm_purgable_control_trap(
         return MACH_SEND_INVALID_DEST;
     }
 
-    int state = 0;
-    if (!read_guest_memory_with_permissions(
-            guest_state, &state, sizeof(state), PROT_READ)) {
-        return KERN_INVALID_ADDRESS;
-    }
-    if (control != VM_PURGABLE_SET_STATE &&
-            control != VM_PURGABLE_GET_STATE &&
-            control != VM_PURGABLE_PURGE_ALL) {
-        return KERN_INVALID_ARGUMENT;
-    }
+    (void)guest_address;
+    (void)control;
 
-    kern_return_t result = KERN_FAILURE;
-    if (control == VM_PURGABLE_PURGE_ALL) {
-        /* XNU ignores the address for this process-wide operation.  In
-         * particular, callers are permitted to pass zero or a value that is
-         * not a mapped guest address. */
-        result = _kernelrpc_mach_vm_purgable_control_trap(
-            mach_task_self(), 0, control, &state);
-    } else {
-        if (guest_address > UINT32_MAX) {
+    /*
+     * Compatibility mode for older 32-bit iOS games.
+     *
+     * The old Testing-GADMRAID branch deliberately kept guest purgeable
+     * allocations resident.  Forwarding purgeable state to the modern host
+     * kernel lets it discard pages that old Unity versions may still be using
+     * as texture/image cache backing, which can leave sprites solid black.
+     * Report the memory as NONVOLATILE instead, matching the older branch.
+     */
+    if (guest_state) {
+        const int nonvolatile = VM_PURGABLE_NONVOLATILE;
+        if (!write_guest_memory_with_permissions(
+                guest_state, &nonvolatile, sizeof(nonvolatile),
+                PROT_WRITE)) {
             return KERN_INVALID_ADDRESS;
         }
-
-        std::lock_guard<std::recursive_mutex> lock(guestVmMutex);
-        const u64 guestPageAddress =
-            guest_address & ~u64(DYN_PAGE_MASK);
-        khash_t(memory) *memory = sharedHandle.memory;
-        if (memory == nullptr) {
-            return KERN_INVALID_ADDRESS;
-        }
-        const khiter_t iterator = kh_get(
-            memory, memory, guestPageAddress);
-        if (iterator == kh_end(memory)) {
-            return KERN_INVALID_ADDRESS;
-        }
-        const t_memory_page page = kh_value(memory, iterator);
-        if (page == nullptr || page->addr == nullptr) {
-            return KERN_INVALID_ADDRESS;
-        }
-
-        const mach_vm_address_t hostAddress =
-            reinterpret_cast<mach_vm_address_t>(page->addr) +
-            (guest_address & DYN_PAGE_MASK);
-        result = _kernelrpc_mach_vm_purgable_control_trap(
-            mach_task_self(), hostAddress, control, &state);
     }
-    if (result == KERN_SUCCESS &&
-            !write_guest_memory_with_permissions(
-                guest_state, &state, sizeof(state), PROT_WRITE)) {
-        result = KERN_INVALID_ADDRESS;
-    }
-    return result;
+    return KERN_SUCCESS;
 }
 
 kern_return_t guest__kernelrpc_mach_port_construct_trap(mach_port_name_t target, u32 guest_options, u64 context, u32 guest_name) {
@@ -5097,7 +5066,7 @@ kern_return_t guest__kernelrpc_mach_vm_map_trap(mach_port_name_t target, u32 gue
         static_cast<u32>(suppliedAddress),
         size, cur_protection, MAP_PRIVATE | MAP_ANONYMOUS,
         -1, 0, mask ?: DYN_PAGE_MASK,
-        (flags & VM_FLAGS_PURGABLE) != 0);
+        false /* compatibility: keep guest purgeable memory resident */);
     if (result == -1) {
         return KERN_NO_SPACE;
     }
