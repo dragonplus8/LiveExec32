@@ -2,6 +2,10 @@
 @import Foundation;
 #include <asl.h>
 
+@interface NSUserDefaults(LiveContainer)
++ (instancetype)lcSharedDefaults;
+@end
+
 __attribute__((constructor)) void logToFileIfNeeded() {
     // Don't log in CLI
     if(getppid() != 1) return;
@@ -13,6 +17,7 @@ __attribute__((constructor)) void logToFileIfNeeded() {
     NSString *oldName = [home stringByAppendingPathComponent:@"LiveExec32.old.log"];
     [fm removeItemAtPath:oldName error:nil];
     [fm moveItemAtPath:currName toPath:oldName error:nil];
+    [NSUserDefaults.lcSharedDefaults setURL:[NSURL fileURLWithPath:currName] forKey:@"LC32BitTranslationLayerLogFile"];
 
     [fm createFileAtPath:currName contents:nil attributes:nil];
     NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:currName];
