@@ -11,12 +11,15 @@
 #import <objc/runtime.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <mutex>
 #include <new>
+#include <pthread.h>
+#include <stdio.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,6 +54,40 @@ constexpr size_t kMaximumTransfer = 256u * 1024u * 1024u;
 constexpr size_t kMaximumString = 16u * 1024u * 1024u;
 
 thread_local GLenum bridgeError = GL_NO_ERROR;
+
+static std::atomic<uint32_t> LC32TextureDiagnosticCount{0};
+
+uint32_t LC32TextureSampleHash(const void *data, size_t byteCount) {
+    if(!data || !byteCount) return 0;
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    uint32_t hash = 2166136261u;
+    const size_t samples = std::min<size_t>(byteCount, 64);
+    for(size_t i = 0; i < samples; ++i) {
+        const size_t index = samples == 1 ? 0 :
+            (i * (byteCount - 1)) / (samples - 1);
+        hash ^= bytes[index];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+void LC32LogTextureUpload(const char *kind, GLenum target, GLint level,
+        GLsizei width, GLsizei height, GLenum format, GLenum type,
+        uint32_t guestPointer, size_t byteCount, const void *data) {
+    const uint32_t sequence = LC32TextureDiagnosticCount.fetch_add(
+        1, std::memory_order_relaxed) + 1;
+    EAGLContext *context = EAGLContext.currentContext;
+    if(sequence <= 1200 || context == nil) {
+        fprintf(stderr,
+            "LC32GFX: #%u %s target=0x%x level=%d size=%dx%d "
+            "fmt=0x%x type=0x%x guest=0x%08x bytes=%zu hash=0x%08x "
+            "ctx=%p main=%d hostThread=0x%x\n",
+            sequence, kind, target, level, width, height, format, type,
+            guestPointer, byteCount, LC32TextureSampleHash(data, byteCount),
+            (__bridge void *)context, pthread_main_np() ? 1 : 0,
+            pthread_mach_thread_np(pthread_self()));
+    }
+}
 
 void SetBridgeError(GLenum error) {
     if(bridgeError == GL_NO_ERROR) bridgeError = error;
@@ -170,6 +207,13 @@ bool ReadGuestBytes(uint32_t guestAddress, size_t byteCount,
     bytes.resize(byteCount);
     if(byteCount && Dynarmic_mem_1read(guestAddress, byteCount,
             reinterpret_cast<char *>(bytes.data())) != 0) {
+        fprintf(stderr,
+            "LC32GFX: ReadGuestBytes FAILED guest=0x%08x bytes=%zu "
+            "ctx=%p main=%d hostThread=0x%x\n",
+            guestAddress, byteCount,
+            (__bridge void *)EAGLContext.currentContext,
+            pthread_main_np() ? 1 : 0,
+            pthread_mach_thread_np(pthread_self()));
         SetBridgeError(GL_INVALID_OPERATION);
         return false;
     }
@@ -2216,6 +2260,18 @@ size_t VertexAttribElementCount(GLenum pname) {
 
 - (BOOL)lc32_renderbufferStorage:(NSUInteger)target
                     fromDrawable:(id<EAGLDrawable>)drawable {
+    CAEAGLLayer *diagLayer = [(id)drawable isKindOfClass:CAEAGLLayer.class]
+        ? (CAEAGLLayer *)(id)drawable : nil;
+    fprintf(stderr,
+        "LC32GFX: renderbufferStorage BEGIN self=%p current=%p target=0x%lx "
+        "drawable=%p bounds=%.1fx%.1f contentsScale=%.2f main=%d hostThread=0x%x\n",
+        (__bridge void *)self, (__bridge void *)EAGLContext.currentContext,
+        (unsigned long)target, (__bridge void *)(id)drawable,
+        diagLayer ? diagLayer.bounds.size.width : 0.0,
+        diagLayer ? diagLayer.bounds.size.height : 0.0,
+        diagLayer ? diagLayer.contentsScale : 0.0,
+        pthread_main_np() ? 1 : 0,
+        pthread_mach_thread_np(pthread_self()));
     CAEAGLLayer *drawableLayer = nil;
     BOOL requestedRGB565 = NO;
     if([(id)drawable isKindOfClass:CAEAGLLayer.class]) {
@@ -2289,6 +2345,15 @@ size_t VertexAttribElementCount(GLenum pname) {
         result = [self lc32_renderbufferStorage:target
                                     fromDrawable:drawable];
     }
+    fprintf(stderr,
+        "LC32GFX: renderbufferStorage END result=%d self=%p current=%p "
+        "bounds=%.1fx%.1f main=%d hostThread=0x%x\n",
+        result ? 1 : 0, (__bridge void *)self,
+        (__bridge void *)EAGLContext.currentContext,
+        drawableLayer ? drawableLayer.bounds.size.width : 0.0,
+        drawableLayer ? drawableLayer.bounds.size.height : 0.0,
+        pthread_main_np() ? 1 : 0,
+        pthread_mach_thread_np(pthread_self()));
     return result;
 }
 
@@ -3252,6 +3317,11 @@ extern "C" uint32_t LC32_OpenGLES_Dispatch(uint32_t opcode,
                 SetBridgeError(GL_INVALID_VALUE);
                 return 0;
             }
+            LC32LogTextureUpload(
+                image ? "CompressedTexImage2D" : "CompressedTexSubImage2D",
+                U(0), I(1), image ? I(3) : I(4), image ? I(4) : I(5),
+                image ? U(2) : U(6), 0, U(pointerSlot),
+                signedSize > 0 ? (size_t)signedSize : 0, data);
             if(image) {
                 glCompressedTexImage2D(U(0), I(1), U(2), I(3), I(4), I(5),
                     signedSize, data);
@@ -3856,6 +3926,7 @@ extern "C" uint32_t LC32_OpenGLES_Dispatch(uint32_t opcode,
                 glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
             std::vector<uint8_t> pixels;
             const void *data = nullptr;
+            size_t uploadByteCount = 0;
             if(unpackBuffer) {
                 data = reinterpret_cast<const void *>(
                     static_cast<uintptr_t>(U(pointerSlot)));
@@ -3876,6 +3947,7 @@ extern "C" uint32_t LC32_OpenGLES_Dispatch(uint32_t opcode,
                     SetBridgeError(sizeError);
                     return 0;
                 }
+                uploadByteCount = byteCount;
                 if(byteCount) {
                     if(!ReadGuestBytes(U(pointerSlot), byteCount, pixels))
                         return 0;
@@ -3885,6 +3957,10 @@ extern "C" uint32_t LC32_OpenGLES_Dispatch(uint32_t opcode,
                 SetBridgeError(GL_INVALID_VALUE);
                 return 0;
             }
+            LC32LogTextureUpload(
+                image ? "TexImage2D" : "TexSubImage2D",
+                U(0), I(1), I(widthSlot), I(heightSlot), U(formatSlot),
+                U(typeSlot), U(pointerSlot), uploadByteCount, data);
             if(image) {
                 glTexImage2D(U(0), I(1), I(2), I(3), I(4), I(5),
                     U(6), U(7), data);
