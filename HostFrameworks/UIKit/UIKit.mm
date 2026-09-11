@@ -696,8 +696,16 @@ UIInterfaceOrientationMask LC32SafeDeclaredInterfaceOrientations(
         UIViewController *controller, SEL) {
     NSNumber *cached = objc_getAssociatedObject(
         controller, LC32LegacyOrientationMaskKey);
-    return cached ? (UIInterfaceOrientationMask)cached.unsignedLongLongValue
-                  : LC32GuestInterfacePolicy().declaredOrientations;
+    const UIInterfaceOrientationMask result = cached
+        ? (UIInterfaceOrientationMask)cached.unsignedLongLongValue
+        : LC32GuestInterfacePolicy().declaredOrientations;
+    fprintf(stderr,
+        "LC32ROT: UnityDefaultViewController supported mask=0x%lx "
+        "cached=%s main=%d registered=%d\n",
+        (unsigned long)result, cached ? "yes" : "no",
+        pthread_main_np() ? 1 : 0,
+        Dynarmic_guest_thread_is_registered() ? 1 : 0);
+    return result;
 }
 
 void LC32ScaleLegacyIPadWindow(UIWindow *window);
@@ -1722,6 +1730,21 @@ UIInterfaceOrientation LC32WindowSceneOrientation(
 }
 
 void LC32ScaleLegacyIPadWindow(UIWindow *window) {
+    if(window) {
+        const CGRect diagBounds = LC32NativeViewBounds(window);
+        const CGRect diagScene = window.windowScene
+            ? LC32WindowSceneBounds(window) : CGRectZero;
+        fprintf(stderr,
+            "LC32ROT: scale window=%p class=%s bounds=%.1fx%.1f scene=%.1fx%.1f "
+            "sceneOrientation=%ld root=%s\n",
+            window, class_getName(object_getClass(window)),
+            diagBounds.size.width, diagBounds.size.height,
+            diagScene.size.width, diagScene.size.height,
+            (long)(window.windowScene ? window.windowScene.interfaceOrientation : 0),
+            LC32NativeWindowRootViewController(window)
+                ? class_getName(object_getClass(LC32NativeWindowRootViewController(window)))
+                : "(nil)");
+    }
     /* UIKit owns keyboard, alert, and text-effects windows in the same
      * process. Virtualize only a UIWindow paired with a guest object. */
     if(!window || !window.guest_selfOrNull) return;
@@ -2189,6 +2212,20 @@ void LC32ApplyLegacyWindowPolicy(UIWindow *window) {
     if(!orientations) {
         orientations = policy.declaredOrientations;
     }
+    const CGRect diagWindowBounds = LC32NativeViewBounds(window);
+    fprintf(stderr,
+        "LC32ROT: apply window=%p root=%s guestRoot=%s scene=%p "
+        "sceneBounds=%.1fx%.1f windowBounds=%.1fx%.1f current=%ld "
+        "requested=%ld supported=0x%lx main=%d registered=%d\n",
+        window,
+        rootController ? class_getName(object_getClass(rootController)) : "(nil)",
+        guestRootController ? class_getName(object_getClass(guestRootController)) : "(nil)",
+        scene,
+        sceneBounds.size.width, sceneBounds.size.height,
+        diagWindowBounds.size.width, diagWindowBounds.size.height,
+        (long)current, (long)requested, (unsigned long)orientations,
+        pthread_main_np() ? 1 : 0,
+        Dynarmic_guest_thread_is_registered() ? 1 : 0);
     /* CoreSimulator can expose the opposite provisional landscape side while
      * the key window is being attached. A fixed phone canvas has one exact
      * selected side, so widening that mask would let the native wrapper choose
@@ -2242,9 +2279,15 @@ void LC32ApplyLegacyWindowPolicy(UIWindow *window) {
         geometryOrientations = requestedMask;
     }
     if(LC32MaskForInterfaceOrientation(current) & geometryOrientations) {
+        fprintf(stderr,
+            "LC32ROT: geometry already satisfied current=%ld mask=0x%lx\n",
+            (long)current, (unsigned long)geometryOrientations);
         return;
     }
 
+    fprintf(stderr,
+        "LC32ROT: requesting scene geometry mask=0x%lx current=%ld requested=%ld\n",
+        (unsigned long)geometryOrientations, (long)current, (long)requested);
     if(@available(iOS 16.0, *)) {
         UIWindowSceneGeometryPreferencesIOS *preferences =
             [[UIWindowSceneGeometryPreferencesIOS alloc]
@@ -2956,6 +2999,13 @@ extern "C" bool LC32UIKitGetViewDuringGuestLoad(
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:
         (id<UIViewControllerTransitionCoordinator>)coordinator {
+    fprintf(stderr,
+        "LC32ROT: container viewWillTransition size=%.1fx%.1f currentBounds=%.1fx%.1f "
+        "sceneOrientation=%ld\n",
+        size.width, size.height, self.view.bounds.size.width,
+        self.view.bounds.size.height,
+        (long)(self.view.window.windowScene
+            ? self.view.window.windowScene.interfaceOrientation : 0));
     [super viewWillTransitionToSize:size
          withTransitionCoordinator:coordinator];
     UIInterfaceOrientation targetOrientation =
@@ -3095,6 +3145,10 @@ extern "C" u32 LC32UIKitHandleLegacyStatusBarOrientation(
     if(!LC32UIKitLegacyCompatibilityEnabled()) return 0;
     const UIInterfaceOrientation orientation =
         (UIInterfaceOrientation)orientationValue;
+    fprintf(stderr,
+        "LC32ROT: guest setStatusBarOrientation=%ld main=%d registered=%d\n",
+        (long)orientation, pthread_main_np() ? 1 : 0,
+        Dynarmic_guest_thread_is_registered() ? 1 : 0);
     if(!LC32MaskForInterfaceOrientation(orientation)) return 0;
     LC32LegacyRequestedOrientation.store(
         orientation, std::memory_order_relaxed);
