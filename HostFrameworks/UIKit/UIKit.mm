@@ -685,6 +685,21 @@ BOOL LC32LegacyPrefersStatusBarHidden(UIViewController *, SEL) {
     return LC32GuestInterfacePolicy().statusBarHidden;
 }
 
+/* Unity 4.x's generated UnityDefaultViewController has its own
+ * -supportedInterfaceOrientations implementation which reads renderer-owned
+ * orientation state.  On current UIKit that method can be queried while the
+ * renderer is between legacy rotation callbacks, leaving UIKit with a stale
+ * one-side mask after the first turn.  Testing-GADMRAID avoided that by never
+ * calling the guest implementation for this class and using the cached/bundle
+ * mask instead. */
+UIInterfaceOrientationMask LC32SafeDeclaredInterfaceOrientations(
+        UIViewController *controller, SEL) {
+    NSNumber *cached = objc_getAssociatedObject(
+        controller, LC32LegacyOrientationMaskKey);
+    return cached ? (UIInterfaceOrientationMask)cached.unsignedLongLongValue
+                  : LC32GuestInterfacePolicy().declaredOrientations;
+}
+
 void LC32ScaleLegacyIPadWindow(UIWindow *window);
 CGRect LC32WindowSceneBounds(UIWindow *window);
 bool LC32UsesClassicFullScreenViewport(UIWindow *window);
@@ -3051,6 +3066,24 @@ extern "C" void LC32UIKitPrepareGuestClass(Class cls) {
      * method wins because class_addMethod leaves an existing method intact. */
     addNativeAdapter(@selector(prefersStatusBarHidden),
         (IMP)&LC32LegacyPrefersStatusBarHidden);
+
+    /* Unity 4.x special case carried over from Testing-GADMRAID.  The generic
+     * wrapper above preserves the guest IMP for ordinary controllers, but this
+     * generated Unity controller must keep a stable host-only orientation mask
+     * so UIKit can rotate repeatedly and resize the GL surface correctly. */
+    if(strcmp(class_getName(cls), "UnityDefaultViewController") == 0) {
+        Method declaration = class_getInstanceMethod(
+            UIViewController.class,
+            @selector(supportedInterfaceOrientations));
+        if(declaration) {
+            class_replaceMethod(cls,
+                @selector(supportedInterfaceOrientations),
+                (IMP)&LC32SafeDeclaredInterfaceOrientations,
+                method_getTypeEncoding(declaration));
+            fprintf(stderr,
+                "LC32: installed UnityDefaultViewController stable orientation mask\n");
+        }
+    }
 
 }
 
