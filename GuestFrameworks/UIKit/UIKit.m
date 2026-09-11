@@ -713,7 +713,15 @@ compatibleWithTraitCollection:nil];
     /* Before iOS 8, UIScreen coordinates remained portrait-oriented.
      * Legacy landscape apps transpose this size themselves, so undo modern
      * UIKit's orientation-aware ordering while retaining point units. */
+    /* Only force portrait-oriented pre-iOS-8 UIScreen coordinates for the
+     * fixed legacy canvas modes that actually need LC32 to emulate that old
+     * compositor contract.  Ordinary universal apps such as Unity 4 games
+     * already reconcile their renderer against the host window orientation;
+     * transposing UIScreen.bounds here makes their EAGL layer and render
+     * target disagree (for example 834x1194 vs 1194x834). */
     if(LC32GuestUsesLegacyScreenCoordinates() &&
+            (LC32RequiresLegacyIPadCanvas() ||
+             LC32RequiresFixedLandscapePhoneCanvas()) &&
             bounds.size.width > bounds.size.height) {
         const CGFloat width = bounds.size.width;
         bounds.size.width = bounds.size.height;
