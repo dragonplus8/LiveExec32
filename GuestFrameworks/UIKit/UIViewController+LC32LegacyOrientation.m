@@ -11,6 +11,27 @@ static uint64_t LC32HostLegacyControllerOrientation;
 
 + (void)load {
     if(!LC32GuestUIKitLegacyCompatibilityEnabled()) return;
+
+    /* Apps which already declare UISupportedInterfaceOrientations use the
+     * iOS 6/7 controller-orientation contract directly.  The older working
+     * LiveExec32 branch did not replace UIViewController.interfaceOrientation
+     * for these apps.  Interposing it here can feed Unity 4 a synthesized
+     * orientation during bootstrap/rotation and prevent the engine from
+     * performing its own portrait -> landscape handoff.
+     *
+     * Keep the newer compatibility fallback only for genuinely older apps
+     * which rely on UIInterfaceOrientation without a supported-orientations
+     * array. */
+    NSDictionary *info = NSBundle.mainBundle.infoDictionary;
+    id supported = [info objectForKey:@"UISupportedInterfaceOrientations"];
+    id supportedIPad = [info objectForKey:@"UISupportedInterfaceOrientations~ipad"];
+    if(([supported isKindOfClass:NSArray.class] &&
+            [(NSArray *)supported count] != 0) ||
+       ([supportedIPad isKindOfClass:NSArray.class] &&
+            [(NSArray *)supportedIPad count] != 0)) {
+        return;
+    }
+
     const uint64_t sdkFunction = LC32Dlsym(
         "LC32GetGuestExecutableSDKVersion", YES);
     const uint32_t sdk = sdkFunction ? LC32InvokeHostCRet32(sdkFunction) : 0;
