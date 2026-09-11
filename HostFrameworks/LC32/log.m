@@ -17,7 +17,9 @@ __attribute__((constructor)) void logToFileIfNeeded() {
     NSString *oldName = [home stringByAppendingPathComponent:@"LiveExec32.old.log"];
     [fm removeItemAtPath:oldName error:nil];
     [fm moveItemAtPath:currName toPath:oldName error:nil];
-    [NSUserDefaults.lcSharedDefaults setURL:[NSURL fileURLWithPath:currName] forKey:@"LC32BitTranslationLayerLogFile"];
+    if (getenv("LC_HOME_PATH")) {
+        [NSUserDefaults.lcSharedDefaults setURL:[NSURL fileURLWithPath:currName] forKey:@"LC32BitTranslationLayerLogFile"];
+    }
 
     [fm createFileAtPath:currName contents:nil attributes:nil];
     NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:currName];
