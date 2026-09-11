@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <SystemConfiguration/SystemConfiguration.h>
+#import <dispatch/dispatch.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -90,6 +91,7 @@ typedef struct LC32SCNetworkReachabilityRegistration {
     SCNetworkReachabilityContext _context;
     CFRunLoopSourceRef _source;
     LC32SCNetworkReachabilityRegistration *_registrations;
+    dispatch_queue_t _dispatchQueue;
     BOOL _scheduled;
     BOOL _initialCallbackPending;
 }
@@ -138,6 +140,10 @@ typedef struct LC32SCNetworkReachabilityRegistration {
         CFRunLoopSourceInvalidate(source);
         CFRelease(source);
     }
+    if(_dispatchQueue) {
+        dispatch_release(_dispatchQueue);
+        _dispatchQueue = NULL;
+    }
     if(_context.release && _context.info)
         _context.release(_context.info);
     [super dealloc];
@@ -167,11 +173,25 @@ LC32SCNetworkReachabilityFindRegistration(
 
 static void LC32SCNetworkReachabilitySignalInitial(
         LC32SCNetworkReachability *reachability) {
-    if(!reachability->_callback || !reachability->_source ||
-       !reachability->_registrations ||
-       reachability->_initialCallbackPending) {
+    if(!reachability->_callback || reachability->_initialCallbackPending) {
         return;
     }
+    /*
+     * Match the older Testing-GADMRAID compatibility path: dispatch-queue
+     * scheduling and run-loop scheduling are alternate delivery mechanisms.
+     * PlunderNauts uses SCNetworkReachabilitySetDispatchQueue, so preserve
+     * that API even though the updated branch had dropped it.
+     */
+    if(reachability->_dispatchQueue) {
+        reachability->_initialCallbackPending = YES;
+        [reachability retain];
+        dispatch_async(reachability->_dispatchQueue, ^{
+            [reachability lc32_deliverInitialReachability];
+            [reachability release];
+        });
+        return;
+    }
+    if(!reachability->_source || !reachability->_registrations) return;
     reachability->_initialCallbackPending = YES;
     CFRunLoopSourceSignal(reachability->_source);
     for(LC32SCNetworkReachabilityRegistration *registration =
@@ -338,6 +358,24 @@ Boolean SCNetworkReachabilityUnscheduleFromRunLoop(
         CFRunLoopSourceInvalidate(source);
         CFRelease(source);
         [reachability release];
+    }
+    return true;
+}
+
+Boolean SCNetworkReachabilitySetDispatchQueue(
+        SCNetworkReachabilityRef target, dispatch_queue_t queue) {
+    if(!target) return false;
+    LC32SCNetworkReachability *reachability =
+        (LC32SCNetworkReachability *)target;
+
+    if(reachability->_dispatchQueue) {
+        dispatch_release(reachability->_dispatchQueue);
+        reachability->_dispatchQueue = NULL;
+    }
+    if(queue) {
+        dispatch_retain(queue);
+        reachability->_dispatchQueue = queue;
+        LC32SCNetworkReachabilitySignalInitial(reachability);
     }
     return true;
 }
